@@ -164,12 +164,27 @@ class ConfigManager:
             camera_cfg = CameraConfig()
             if 'camera' in data:
                 cam_data = data['camera']
+
+                # Convert position dict to tuple if needed
+                position = cam_data.get('position', camera_cfg.position)
+                if isinstance(position, dict):
+                    position = (position['x'], position['y'], position['z'])
+                elif not isinstance(position, tuple):
+                    position = tuple(position)
+
+                # Convert rotation dict to tuple if needed
+                rotation = cam_data.get('rotation', camera_cfg.rotation)
+                if isinstance(rotation, dict):
+                    rotation = (rotation['pitch'], rotation['yaw'], rotation['roll'])
+                elif not isinstance(rotation, tuple):
+                    rotation = tuple(rotation)
+
                 camera_cfg = CameraConfig(
                     width=cam_data.get('width', camera_cfg.width),
                     height=cam_data.get('height', camera_cfg.height),
                     fov=cam_data.get('fov', camera_cfg.fov),
-                    position=tuple(cam_data.get('position', camera_cfg.position)),
-                    rotation=tuple(cam_data.get('rotation', camera_cfg.rotation)),
+                    position=position,
+                    rotation=rotation,
                 )
 
             # Parse CV detector config

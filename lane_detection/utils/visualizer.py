@@ -5,8 +5,14 @@ Provides visualization utilities for lane detection and LKAS feedback.
 
 import cv2
 import numpy as np
-from typing import Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict, Union
 from .lane_analyzer import LaneDepartureStatus
+
+# Import Lane model
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.models import Lane
 
 
 class LKASVisualizer:
@@ -34,8 +40,8 @@ class LKASVisualizer:
     def draw_lanes(
         self,
         image: np.ndarray,
-        left_lane: Optional[Tuple[int, int, int, int]],
-        right_lane: Optional[Tuple[int, int, int, int]],
+        left_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
+        right_lane: Optional[Union[Lane, Tuple[int, int, int, int]]],
         fill_lane: bool = True,
     ) -> np.ndarray:
         """
@@ -43,8 +49,8 @@ class LKASVisualizer:
 
         Args:
             image: Input image
-            left_lane: Left lane line (x1, y1, x2, y2)
-            right_lane: Right lane line (x1, y1, x2, y2)
+            left_lane: Left lane (Lane object or tuple (x1, y1, x2, y2))
+            right_lane: Right lane (Lane object or tuple (x1, y1, x2, y2))
             fill_lane: Whether to fill the lane area
 
         Returns:
@@ -52,15 +58,26 @@ class LKASVisualizer:
         """
         output = image.copy()
 
-        if fill_lane and left_lane and right_lane:
+        # Convert Lane objects to tuples for easier access
+        def to_tuple(lane):
+            if lane is None:
+                return None
+            if isinstance(lane, Lane):
+                return (lane.x1, lane.y1, lane.x2, lane.y2)
+            return lane
+
+        left_tuple = to_tuple(left_lane)
+        right_tuple = to_tuple(right_lane)
+
+        if fill_lane and left_tuple and right_tuple:
             # Fill lane area
             lane_poly = np.array(
                 [
                     [
-                        [left_lane[0], left_lane[1]],
-                        [left_lane[2], left_lane[3]],
-                        [right_lane[2], right_lane[3]],
-                        [right_lane[0], right_lane[1]],
+                        [left_tuple[0], left_tuple[1]],
+                        [left_tuple[2], left_tuple[3]],
+                        [right_tuple[2], right_tuple[3]],
+                        [right_tuple[0], right_tuple[1]],
                     ]
                 ],
                 dtype=np.int32,
@@ -71,20 +88,20 @@ class LKASVisualizer:
             output = cv2.addWeighted(output, 0.7, overlay, 0.3, 0)
 
         # Draw lane lines
-        if left_lane:
+        if left_tuple:
             cv2.line(
                 output,
-                (left_lane[0], left_lane[1]),
-                (left_lane[2], left_lane[3]),
+                (left_tuple[0], left_tuple[1]),
+                (left_tuple[2], left_tuple[3]),
                 self.COLOR_BLUE,
                 3,
             )
 
-        if right_lane:
+        if right_tuple:
             cv2.line(
                 output,
-                (right_lane[0], right_lane[1]),
-                (right_lane[2], right_lane[3]),
+                (right_tuple[0], right_tuple[1]),
+                (right_tuple[2], right_tuple[3]),
                 self.COLOR_BLUE,
                 3,
             )
@@ -113,11 +130,11 @@ class LKASVisualizer:
         output = image.copy()
         height = output.shape[0]
 
-        # Draw vehicle center line
+        # Draw vehicle center line (convert to int for OpenCV)
         cv2.line(
             output,
-            (vehicle_center_x, height - 50),
-            (vehicle_center_x, height),
+            (int(vehicle_center_x), height - 50),
+            (int(vehicle_center_x), height),
             self.COLOR_WHITE,
             2,
         )
@@ -137,7 +154,7 @@ class LKASVisualizer:
             if abs(vehicle_center_x - lane_center_x) > 5:
                 cv2.arrowedLine(
                     output,
-                    (vehicle_center_x, height - 25),
+                    (int(vehicle_center_x), height - 25),
                     (int(lane_center_x), height - 25),
                     color,
                     2,

@@ -82,17 +82,17 @@ class LaneKeepingAssist:
 
         # Initialize CARLA interface
         print("Initializing CARLA interface...")
-        self.carla = CARLAInterface(
-            host=args.host,
-            port=args.port
-        )
+        # Use args if provided, otherwise use config
+        carla_host = args.host if args.host else config.carla.host
+        carla_port = args.port if args.port else config.carla.port
+
+        self.carla = CARLAInterface(host=carla_host, port=carla_port)
 
         # Create lane detector using factory pattern
         print(f"Creating {args.method.upper()} detector...")
         factory = DetectorFactory(config)
         detector = factory.create(
-            args.method,
-            model_path=args.model if args.method == 'dl' else None
+            args.method, model_path=args.model if args.method == "dl" else None
         )
         print(f"✓ Detector created: {detector.get_name()}")
 
@@ -101,28 +101,21 @@ class LaneKeepingAssist:
             image_width=config.camera.width,
             image_height=config.camera.height,
             drift_threshold=config.analyzer.drift_threshold,
-            departure_threshold=config.analyzer.departure_threshold
+            departure_threshold=config.analyzer.departure_threshold,
         )
 
         visualizer = LKASVisualizer(
-            image_width=config.camera.width,
-            image_height=config.camera.height
+            image_width=config.camera.width, image_height=config.camera.height
         )
 
         # Create processing components (NEW!)
         self.processor = FrameProcessor(detector, analyzer, visualizer)
-        self.controller = PDController(
-            kp=config.controller.kp,
-            kd=config.controller.kd
-        )
+        self.controller = PDController(kp=config.controller.kp, kd=config.controller.kd)
         self.metrics_logger = MetricsLogger()
 
         # Create UI components (NEW!)
         self.keyboard = KeyboardHandler()
-        self.video_recorder = VideoRecorder(
-            output_path=args.save_video,
-            fps=30.0
-        )
+        self.video_recorder = VideoRecorder(output_path=args.save_video, fps=30.0)
 
         # Spectator overlay (initialized after CARLA connection)
         self.spectator_overlay = None
@@ -145,8 +138,7 @@ class LaneKeepingAssist:
 
         # Spawn vehicle
         if not self.carla.spawn_vehicle(
-            self.config.carla.vehicle_type,
-            spawn_point_index=self.args.spawn_point
+            self.config.carla.vehicle_type, spawn_point_index=self.args.spawn_point
         ):
             return False
 
@@ -156,7 +148,7 @@ class LaneKeepingAssist:
             image_height=self.config.camera.height,
             fov=self.config.camera.fov,
             position=self.config.camera.position,
-            rotation=self.config.camera.rotation
+            rotation=self.config.camera.rotation,
         ):
             return False
 
@@ -169,8 +161,7 @@ class LaneKeepingAssist:
         # Start video recording if requested
         if self.args.save_video:
             self.video_recorder.start(
-                self.config.camera.width,
-                self.config.camera.height
+                self.config.camera.width, self.config.camera.height
             )
 
         print("✓ CARLA setup complete!")
@@ -185,24 +176,24 @@ class LaneKeepingAssist:
             Easy to add/remove/modify controls.
         """
         # Register keyboard actions
-        self.keyboard.register('q', self._quit, "Quit")
-        self.keyboard.register('s', self._toggle_autopilot, "Toggle autopilot")
-        self.keyboard.register('o', self._toggle_spectator, "Toggle spectator overlay")
-        self.keyboard.register('f', self._toggle_follow, "Toggle spectator follow")
-        self.keyboard.register('r', self._respawn_vehicle, "Respawn vehicle")
-        self.keyboard.register('t', self._teleport, "Teleport to spawn point")
+        self.keyboard.register("q", self._quit, "Quit")
+        self.keyboard.register("s", self._toggle_autopilot, "Toggle autopilot")
+        self.keyboard.register("o", self._toggle_spectator, "Toggle spectator overlay")
+        self.keyboard.register("f", self._toggle_follow, "Toggle spectator follow")
+        self.keyboard.register("r", self._respawn_vehicle, "Respawn vehicle")
+        self.keyboard.register("t", self._teleport, "Teleport to spawn point")
 
         # Print help
-        print("\n" + "=" * 60)
-        print("Keyboard Controls:")
-        print("=" * 60)
-        print("  'q' → Quit")
-        print("  's' → Toggle autopilot")
-        print("  'o' → Toggle spectator overlay")
-        print("  'f' → Toggle spectator follow mode")
-        print("  'r' → Respawn vehicle")
-        print("  't' → Teleport to next spawn point")
-        print("=" * 60 + "\n")
+        # print("\n" + "=" * 60)
+        # print("Keyboard Controls:")
+        # print("=" * 60)
+        # print("  'q' → Quit")
+        # print("  's' → Toggle autopilot")
+        # print("  'o' → Toggle spectator overlay")
+        # print("  'f' → Toggle spectator follow mode")
+        # print("  'r' → Respawn vehicle")
+        # print("  't' → Teleport to next spawn point")
+        # print("=" * 60 + "\n")
 
     def run(self):
         """
@@ -249,7 +240,7 @@ class LaneKeepingAssist:
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
                     (255, 255, 255),
-                    2
+                    2,
                 )
 
                 # Display visualization
@@ -279,25 +270,19 @@ class LaneKeepingAssist:
 
         # Draw vehicle position
         self.spectator_overlay.draw_vehicle_position(
-            self.carla.vehicle,
-            color=departure_color,
-            lifetime=0.1
+            self.carla.vehicle, color=departure_color, lifetime=0.1
         )
 
         # Add info text
         info_text = f"Lane: {metrics.departure_status.value}"
         self.spectator_overlay.draw_vehicle_info_text(
-            self.carla.vehicle,
-            additional_info=info_text,
-            lifetime=0.1
+            self.carla.vehicle, additional_info=info_text, lifetime=0.1
         )
 
         # Update spectator camera if follow mode enabled
         if self.follow_with_spectator:
             self.spectator_overlay.update_spectator_camera(
-                self.carla.vehicle,
-                follow_distance=20.0,
-                height=10.0
+                self.carla.vehicle, follow_distance=20.0, height=10.0
             )
 
     def _get_departure_color(self, status: LaneDepartureStatus):
@@ -306,9 +291,15 @@ class LaneKeepingAssist:
 
         if status == LaneDepartureStatus.CENTERED:
             return carla.Color(0, 255, 0)  # Green
-        elif status in [LaneDepartureStatus.LEFT_DRIFT, LaneDepartureStatus.RIGHT_DRIFT]:
+        elif status in [
+            LaneDepartureStatus.LEFT_DRIFT,
+            LaneDepartureStatus.RIGHT_DRIFT,
+        ]:
             return carla.Color(255, 255, 0)  # Yellow
-        elif status in [LaneDepartureStatus.LEFT_DEPARTURE, LaneDepartureStatus.RIGHT_DEPARTURE]:
+        elif status in [
+            LaneDepartureStatus.LEFT_DEPARTURE,
+            LaneDepartureStatus.RIGHT_DEPARTURE,
+        ]:
             return carla.Color(255, 0, 0)  # Red
         else:
             return carla.Color(255, 255, 255)  # White
@@ -360,7 +351,7 @@ class LaneKeepingAssist:
                 image_height=self.config.camera.height,
                 fov=self.config.camera.fov,
                 position=self.config.camera.position,
-                rotation=self.config.camera.rotation
+                rotation=self.config.camera.rotation,
             )
             print("✓ Vehicle respawned")
         else:
@@ -397,48 +388,28 @@ def main():
         type=str,
         default="cv",
         choices=["cv", "dl"],
-        help="Lane detection method (cv=Computer Vision, dl=Deep Learning)"
+        help="Lane detection method (cv=Computer Vision, dl=Deep Learning)",
     )
     parser.add_argument(
-        "--config",
-        type=str,
-        default="config.yaml",
-        help="Path to configuration file"
+        "--config", type=str, default="config.yaml", help="Path to configuration file"
     )
     parser.add_argument(
-        "--host",
-        type=str,
-        default=None,
-        help="CARLA server host (overrides config)"
+        "--host", type=str, default=None, help="CARLA server host (overrides config)"
     )
     parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="CARLA server port (overrides config)"
+        "--port", type=int, default=None, help="CARLA server port (overrides config)"
     )
     parser.add_argument(
-        "--spawn-point",
-        type=int,
-        default=None,
-        help="Spawn point index"
+        "--spawn-point", type=int, default=None, help="Spawn point index"
     )
     parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="Path to pretrained DL model"
+        "--model", type=str, default=None, help="Path to pretrained DL model"
     )
     parser.add_argument(
-        "--no-display",
-        action="store_true",
-        help="Disable visualization display"
+        "--no-display", action="store_true", help="Disable visualization display"
     )
     parser.add_argument(
-        "--save-video",
-        type=str,
-        default=None,
-        help="Path to save output video"
+        "--save-video", type=str, default=None, help="Path to save output video"
     )
 
     args = parser.parse_args()
