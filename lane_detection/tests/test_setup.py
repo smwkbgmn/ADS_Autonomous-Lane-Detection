@@ -5,8 +5,14 @@ Tests individual components without requiring CARLA.
 
 import numpy as np
 import cv2
-from traditional.cv_lane_detector import CVLaneDetector
-from deep_learning.lane_net import SimpleLaneNet, DLLaneDetector
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from method.computer_vision.cv_lane_detector import CVLaneDetector
+from method.deep_learning.lane_net import DLLaneDetector
 from utils.lane_analyzer import LaneAnalyzer, LaneDepartureStatus
 from utils.visualizer import LKASVisualizer
 
@@ -92,18 +98,23 @@ def test_dl_detector():
     detector = DLLaneDetector(model_type='simple')
 
     # Detect lanes
-    lane_mask, debug_image = detector.detect(test_image)
+    result = detector.detect(test_image)
 
     # Display results
-    print(f"Lane mask shape: {lane_mask.shape}")
-    print(f"Lane pixels detected: {np.sum(lane_mask > 0)}")
+    print(f"Left lane detected: {result.left_lane is not None}")
+    if result.left_lane:
+        print(f"  Left lane: {result.left_lane}")
+    print(f"Right lane detected: {result.right_lane is not None}")
+    if result.right_lane:
+        print(f"  Right lane: {result.right_lane}")
 
     # Show image
-    combined = np.hstack([test_image, cv2.cvtColor(lane_mask, cv2.COLOR_GRAY2BGR)])
-    cv2.imshow('DL Lane Detection Test', combined)
+    cv2.imshow('DL Lane Detection Test', result.debug_image)
     print("\nPress any key to continue...")
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
+    return result.left_lane, result.right_lane, test_image
 
 
 def test_lane_analyzer(left_lane, right_lane):
@@ -211,7 +222,7 @@ def main():
         left_lane, right_lane, test_image = test_cv_detector()
 
         # Test DL detector
-        test_dl_detector()
+        dl_left_lane, dl_right_lane, dl_test_image = test_dl_detector()
 
         # Test analyzer (using CV detector results)
         if left_lane and right_lane:
