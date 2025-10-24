@@ -1,281 +1,157 @@
-# Quick Start Guide - Lane Detection System
+# Quick Start Guide - Modular Lane Keeping System
 
-This guide will help you get started with the lane detection implementation for your LKAS project.
+## What's New?
 
-## Overview
+Your lane keeping system has been refactored into **three independent modules**:
 
-The implementation provides:
-- **Traditional CV approach** using OpenCV (Hough Transform)
-- **Deep Learning approach** using PyTorch (CNN segmentation)
-- **Lane position analysis** with drift/departure detection
-- **Visual feedback system** with HUD and alerts
-- **CARLA integration** for simulation testing
+1. **CARLA Module** - Handles simulator, vehicle, and sensors
+2. **Detection Module** - Processes images and detects lanes
+3. **Decision Module** - Analyzes lanes and generates control commands
 
-## Quick Setup (5 minutes)
+## Running the System
 
-### Step 1: Install Dependencies
-
+### 1. Start CARLA (in a separate terminal)
 ```bash
-cd /Users/donghyun/All/seame/ads_ld
-pip install -r requirements.txt
+./CarlaUE4.sh
 ```
 
-### Step 2: Test the Setup (Without CARLA)
-
+### 2. Run the Modular System
 ```bash
-cd lane_detection
-python test_setup.py
+cd /workspaces/ads_ld/lane_detection
+
+# Run with Computer Vision detection
+python main_modular.py --method cv
+
+# Run with Deep Learning detection
+python main_modular.py --method dl
 ```
 
-This will test all components using synthetic test images.
-
-### Step 3: Install CARLA
-
-**⚠️ macOS M1/M2 Users**: CARLA doesn't support Apple Silicon natively!
-👉 **Follow [MACOS_M1_SETUP.md](MACOS_M1_SETUP.md) for Docker-based setup**
-
-**For Linux/Windows users**:
-- Download CARLA from [carla.org](https://carla.org/)
-- Or install Python API: `pip install carla==0.9.15`
-
-### Step 4: Run with CARLA
-
-**Terminal 1 - Start CARLA:**
+### 3. Options
 ```bash
-cd /path/to/CARLA
-./CarlaUE4.sh  # or CarlaUE4.exe on Windows
+# Run without display
+python main_modular.py --method cv --no-display
+
+# Connect to remote CARLA
+python main_modular.py --host 192.168.1.100 --port 2000
+
+# Specific spawn point
+python main_modular.py --spawn-point 5
+
+# Disable autopilot (use pure lane keeping control)
+python main_modular.py --no-autopilot
 ```
 
-**Terminal 2 - Run Lane Detection:**
-```bash
-cd /Users/donghyun/All/seame/ads_ld/lane_detection
-python main.py --method cv
-```
-
-## Project Structure
+## Architecture Overview
 
 ```
-ads_ld/
-├── README.md                    # Project overview
-├── QUICK_START.md              # This file
-├── requirements.txt            # Python dependencies
-└── lane_detection/
-    ├── main.py                 # Main entry point ⭐
-    ├── carla_interface.py      # CARLA connection
-    ├── config.yaml             # Configuration
-    ├── README.md               # Module documentation
-    ├── test_setup.py           # Setup verification
-    ├── traditional/
-    │   └── cv_lane_detector.py # OpenCV detector
-    ├── deep_learning/
-    │   └── lane_net.py         # CNN models
-    └── utils/
-        ├── lane_analyzer.py    # Position analysis
-        └── visualizer.py       # Visualization tools
+┌──────────────────────────────────────────────────────────┐
+│                   ORCHESTRATOR                            │
+│            (integration/orchestrator.py)                  │
+└──────────────────────────────────────────────────────────┘
+    │ coordinates           │                │
+    ▼                       ▼                ▼
+┌─────────────┐    ┌──────────────┐    ┌──────────────┐
+│   CARLA     │───>│  DETECTION   │───>│  DECISION    │
+│   MODULE    │    │    MODULE    │    │    MODULE    │
+│             │<───┼──────────────┘    │              │
+└─────────────┘    │  Sends:           └──────────────┘
+                   │  LaneMessage           │
+Provides:          │                        │ Generates:
+- ImageMessage     └────────────────────────┘ ControlMessage
+- Vehicle control
+
+Data Flow:
+1. CARLA captures image
+2. Detection detects lanes
+3. Decision generates steering
+4. CARLA applies control
 ```
 
-## Usage Examples
+## Module Details
 
-### Basic Usage
+### CARLA Module (`modules/carla_module/`)
+- **connection.py**: Connects to CARLA server
+- **vehicle.py**: Spawns and controls vehicle
+- **sensors.py**: Camera sensor management
 
-```bash
-# Traditional CV method (recommended for starting)
-python main.py --method cv
+### Detection Module (`modules/detection_module/`)
+- **detector.py**: Wraps CV/DL detection methods
+- Returns lane lines with confidence scores
+- Completely independent from CARLA
 
-# Deep learning method (requires trained model)
-python main.py --method dl --model path/to/model.pth
-```
+### Decision Module (`modules/decision_module/`)
+- **analyzer.py**: Analyzes lane geometry
+- **controller.py**: PD controller + decision logic
+- Generates steering/throttle/brake commands
 
-### Save Output Video
+### Integration Layer (`integration/`)
+- **messages.py**: Data structures for communication
+- **orchestrator.py**: Coordinates the three modules
 
-```bash
-python main.py --method cv --save-video output.mp4
-```
+## Key Files
 
-### Custom Settings
+| File | Purpose |
+|------|---------|
+| `main_modular.py` | **NEW** entry point (recommended) |
+| `main.py` | OLD entry point (still works) |
+| `MODULAR_ARCHITECTURE.md` | Detailed architecture documentation |
+| `integration/messages.py` | Message definitions |
+| `integration/orchestrator.py` | System coordinator |
 
-```bash
-python main.py \
-  --method cv \
-  --width 1280 \
-  --height 720 \
-  --vehicle vehicle.audi.a2
-```
+## Benefits
 
-## Understanding the System
+✅ **Independent Modules**: Each can be developed/tested separately
+✅ **Clear Interfaces**: Well-defined message passing
+✅ **Easy Testing**: Mock messages for unit tests
+✅ **Reusable**: Detection module works without CARLA
+✅ **Extensible**: Easy to add new algorithms
 
-### 1. Detection Methods
+## Examples
 
-**Traditional CV (Recommended for starting):**
-- ✅ Fast and interpretable
-- ✅ Works out-of-the-box
-- ✅ Easy to tune parameters
-- ⚠️ Sensitive to lighting/shadows
-
-**Deep Learning:**
-- ✅ More robust to conditions
-- ✅ Can handle complex scenarios
-- ⚠️ Requires trained model
-- ⚠️ Slower inference
-
-### 2. System Pipeline
-
-```
-Camera Image → Lane Detection → Position Analysis → Visualization
-                                       ↓
-                              Steering Correction
-```
-
-### 3. Lane Departure States
-
-- **CENTERED**: Vehicle is centered in lane ✅
-- **DRIFT**: Small deviation (warning) ⚠️
-- **DEPARTURE**: Large deviation (alert) 🚨
-- **NO_LANES**: Cannot detect lanes ❌
-
-## Tuning for Best Results
-
-### If lanes are not detected well:
-
-1. **Adjust Canny thresholds** in `traditional/cv_lane_detector.py`:
-   ```python
-   detector = CVLaneDetector(
-       canny_low=30,    # Try lowering
-       canny_high=100   # Try lowering
-   )
-   ```
-
-2. **Adjust Hough parameters**:
-   ```python
-   hough_threshold=30,      # Try lowering for more lines
-   hough_min_line_len=20,   # Try lowering
-   ```
-
-3. **Check ROI settings** - The region of interest should cover the road ahead
-
-### If steering correction is too aggressive:
-
-Edit gains in `utils/lane_analyzer.py`:
+### Use Detection Module Standalone
 ```python
-steering = analyzer.get_steering_correction(
-    left_lane, right_lane,
-    kp=0.3,  # Reduce for gentler correction
-    kd=0.05  # Reduce for less sensitivity to heading
-)
+from modules.detection_module import LaneDetectionModule
+from core.config import ConfigManager
+import cv2
+
+config = ConfigManager.load('config.yaml')
+detector = LaneDetectionModule(config, method='cv')
+
+image = cv2.imread('test.jpg')
+# ... process image
 ```
 
-## Common Issues
+### Use Decision Module Standalone
+```python
+from modules.decision_module import DecisionController
 
-### "Failed to connect to CARLA"
-- Ensure CARLA server is running
-- Check host/port: `python main.py --host localhost --port 2000`
+controller = DecisionController(800, 600, kp=0.5, kd=0.1)
+# ... generate control from detection
+```
 
-### "No module named 'carla'"
-- Install CARLA Python package: `pip install carla==0.9.13`
-- Or add CARLA PythonAPI to PYTHONPATH
+## Troubleshooting
 
-### Poor performance
-- Reduce resolution: `python main.py --width 640 --height 480`
-- Use headless mode: `python main.py --no-display`
+**Import errors?**
+```bash
+# Make sure you're in the lane_detection directory
+cd /workspaces/ads_ld/lane_detection
+python main_modular.py
+```
 
-### Camera shows black screen
-- Vehicle might not be spawned correctly
-- Try different vehicle: `python main.py --vehicle vehicle.tesla.model3`
+**CARLA connection fails?**
+```bash
+# Check if CARLA is running
+./CarlaUE4.sh
+
+# Try different port
+python main_modular.py --port 2000
+```
 
 ## Next Steps
 
-### 1. Understanding the Code
+1. Read `MODULAR_ARCHITECTURE.md` for detailed documentation
+2. Try running with different detection methods
+3. Experiment with controller gains (edit `config.yaml`)
+4. Add your own detection or control algorithms
 
-Start with these files in order:
-1. `main.py` - See how everything connects
-2. `traditional/cv_lane_detector.py` - Understand lane detection
-3. `utils/lane_analyzer.py` - See position calculation
-4. `utils/visualizer.py` - Check visualization
-
-### 2. Experiment and Tune
-
-- Try different CARLA maps and weather conditions
-- Tune detection parameters for your specific use case
-- Test with different vehicles and camera positions
-
-### 3. Collect Training Data (for DL)
-
-```python
-# Add to main.py to save images
-if frame_count % 30 == 0:  # Save every 30 frames
-    cv2.imwrite(f'data/frame_{frame_count}.jpg', image)
-```
-
-### 4. Extend to PiRacer
-
-When ready for hardware:
-1. Replace `CARLAInterface` with PiRacer camera
-2. Add motor control integration
-3. Implement safety constraints
-4. Calibrate on real track
-
-## Development Tips
-
-### Running Individual Components
-
-```python
-# Test CV detector alone
-from traditional.cv_lane_detector import CVLaneDetector
-import cv2
-
-detector = CVLaneDetector()
-image = cv2.imread('test_image.jpg')
-left, right, debug = detector.detect(image)
-cv2.imshow('Result', debug)
-cv2.waitKey(0)
-```
-
-### Adding Logging
-
-```python
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-logger.info(f"Detected lanes: {left_lane}, {right_lane}")
-```
-
-### Performance Profiling
-
-```python
-import time
-
-start = time.time()
-left, right, debug = detector.detect(image)
-fps = 1.0 / (time.time() - start)
-print(f"FPS: {fps:.1f}")
-```
-
-## Resources
-
-- **CARLA Documentation**: https://carla.readthedocs.io/
-- **OpenCV Tutorials**: https://docs.opencv.org/4.x/d6/d00/tutorial_py_root.html
-- **PyTorch Tutorials**: https://pytorch.org/tutorials/
-
-## Getting Help
-
-If you encounter issues:
-1. Check this guide and the module README
-2. Review the example code in each module's `__main__` block
-3. Run `test_setup.py` to verify your installation
-4. Check CARLA server logs for connection issues
-
-## Team Collaboration
-
-For your team members working on other parts:
-- This module provides lane detection only
-- Integration points:
-  - Input: Camera images (numpy arrays)
-  - Output: Lane lines, metrics, steering correction
-- They can use `LaneAnalyzer` for position data
-- Steering correction is provided but not applied to vehicle
-
----
-
-**Ready to start?** Run `python test_setup.py` to verify everything works!
+Enjoy the new modular architecture! 🚗
