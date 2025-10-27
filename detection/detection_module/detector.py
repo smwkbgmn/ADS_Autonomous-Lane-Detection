@@ -13,7 +13,7 @@ import numpy as np
 import time
 from typing import Optional
 
-from detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
+from simulation.integration.messages import ImageMessage, DetectionMessage, LaneMessage
 from detection.core.factory import DetectorFactory
 from detection.core.config import Config
 

@@ -11,8 +11,8 @@ from enum import Enum
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.models import Lane, LaneMetrics
-from core.models import LaneDepartureStatus as CoreLaneDepartureStatus
+from detection.core.models import Lane, LaneMetrics
+from detection.core.models import LaneDepartureStatus as CoreLaneDepartureStatus
 
 
 class LaneDepartureStatus(Enum):

@@ -17,7 +17,7 @@ import cv2
 from simulation import CARLAConnection, VehicleManager, CameraSensor
 from detection.detection_module import LaneDetectionModule
 from decision import DecisionController
-from detection.integration.messages import (
+from simulation.integration.messages import (
     ImageMessage,
     DetectionMessage,
     ControlMessage,

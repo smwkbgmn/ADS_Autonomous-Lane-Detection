@@ -10,15 +10,15 @@ NEW FEATURES:
 
 Usage:
     # Auto-select best viewer
-    python main_distributed_v2.py --detector-url tcp://localhost:5555
+    python main.py --detector-url tcp://localhost:5555
 
     # Force specific viewer
-    python main_distributed_v2.py --viewer opencv --detector-url tcp://localhost:5555
-    python main_distributed_v2.py --viewer pygame --detector-url tcp://localhost:5555
-    python main_distributed_v2.py --viewer web --detector-url tcp://localhost:5555
+    python main.py --viewer opencv --detector-url tcp://localhost:5555
+    python main.py --viewer pygame --detector-url tcp://localhost:5555
+    python main.py --viewer web --detector-url tcp://localhost:5555
 
     # Web viewer (best for remote/Docker!)
-    python main_distributed_v2.py --viewer web --web-port 8080 --detector-url tcp://localhost:5555
+    python main.py --viewer web --web-port 8080 --detector-url tcp://localhost:5555
     # Then open: http://localhost:8080 in browser
 """
 
@@ -31,11 +31,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import cv2
 import time
 from detection.core.config import ConfigManager
-from detection.integration.visualization import VisualizationManager, auto_select_viewer
+from simulation.integration.visualization import (
+    VisualizationManager,
+    auto_select_viewer,
+)
 from simulation import CARLAConnection, VehicleManager, CameraSensor
 from decision import DecisionController
-from detection.integration.communication import DetectionClient
-from detection.integration.messages import (
+from simulation.integration.communication import DetectionClient
+from simulation.integration.messages import (
     ImageMessage,
     DetectionMessage,
     ControlMessage,

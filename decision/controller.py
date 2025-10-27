@@ -11,14 +11,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from typing import Optional
-from detection.integration.messages import (
+from simulation.integration.messages import (
     DetectionMessage,
     ControlMessage,
     LaneMessage,
     ControlMode,
 )
 from .analyzer import LaneAnalyzer
-from detection.processing.pd_controller import PDController
+from simulation.processing.pd_controller import PDController
 
 
 class DecisionController:

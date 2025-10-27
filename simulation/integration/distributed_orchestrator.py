@@ -23,8 +23,8 @@ import cv2
 
 from simulation import CARLAConnection, VehicleManager, CameraSensor
 from decision import DecisionController
-from detection.integration.communication import DetectionClient
-from detection.integration.messages import (
+from simulation.integration.communication import DetectionClient
+from simulation.integration.messages import (
     ImageMessage,
     DetectionMessage,
     ControlMessage,

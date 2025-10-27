@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import time
 from typing import Optional
-from core.models import LaneMetrics
+from detection.core.models import LaneMetrics
 
 
 class MetricsLogger:

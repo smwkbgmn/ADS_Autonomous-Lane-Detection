@@ -12,7 +12,7 @@ from .lane_analyzer import LaneDepartureStatus
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from core.models import Lane
+from detection.core.models import Lane
 
 
 class LKASVisualizer:

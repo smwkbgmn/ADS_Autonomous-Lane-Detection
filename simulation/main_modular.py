@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from detection.core.config import ConfigManager
-from detection.integration.orchestrator import SystemOrchestrator
+from simulation.integration.orchestrator import SystemOrchestrator
 
 
 def main():

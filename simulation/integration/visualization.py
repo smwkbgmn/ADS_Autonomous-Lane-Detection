@@ -52,7 +52,7 @@ class VisualizationManager:
 
         elif self.viewer_type == 'pygame':
             try:
-                from ui.pygame_viewer import PygameViewer
+                from simulation.ui.pygame_viewer import PygameViewer
                 self.viewer = PygameViewer(self.width, self.height)
                 print("✓ Using Pygame viewer (better X11 support)")
             except ImportError:
@@ -62,7 +62,7 @@ class VisualizationManager:
 
         elif self.viewer_type == 'web':
             try:
-                from ui.web_viewer import WebViewer
+                from simulation.ui.web_viewer import WebViewer
                 self.viewer = WebViewer(self.web_port)
                 self.viewer.start()
                 print(f"✓ Using Web viewer")

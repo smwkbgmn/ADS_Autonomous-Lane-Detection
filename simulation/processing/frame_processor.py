@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 from typing import Tuple, Optional
 
-from core.interfaces import LaneDetector
-from core.models import DetectionResult, LaneMetrics
-from utils.lane_analyzer import LaneAnalyzer
-from utils.visualizer import LKASVisualizer
+from detection.core.interfaces import LaneDetector
+from detection.core.models import DetectionResult, LaneMetrics
+from simulation.utils.lane_analyzer import LaneAnalyzer
+from simulation.utils.visualizer import LKASVisualizer
 
 
 class FrameProcessor:

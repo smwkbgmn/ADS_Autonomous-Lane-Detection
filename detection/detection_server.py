@@ -31,8 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from detection.core.config import ConfigManager
 from detection.detection_module import LaneDetectionModule
-from detection.integration.communication import DetectionServer
-from detection.integration.messages import ImageMessage, DetectionMessage
+from simulation.integration.communication import DetectionServer
+from simulation.integration.messages import ImageMessage, DetectionMessage
 
 
 class StandaloneDetectionServer:

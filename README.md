@@ -1,26 +1,25 @@
-# Lane Detection for Autonomous Driving - CARLA Implementation
+# Autonomous Driving Lane Keeping System
 
-A modular, production-ready lane detection system for CARLA simulator with support for both Computer Vision and Deep Learning methods.
+A modular, production-ready lane keeping system for CARLA simulator with clean separation of concerns.
 
 ## 🌟 Features
 
-- **Modular Architecture**: Clean separation between CARLA, Detection, and Decision modules
+- **Clean 3-Module Architecture**: Simulation, Detection, Decision
 - **Dual Detection Methods**: Computer Vision (OpenCV) and Deep Learning (PyTorch CNN)
 - **Distributed System**: Run detection on remote GPU servers
 - **Multiple Visualization Options**: OpenCV, Pygame, and Web viewer (no X11 needed!)
 - **Production Ready**: Process isolation, ZMQ communication, fault tolerance
-- **Dev Container**: Seamless development on M1 Mac with Docker
 
 ## 🚀 Quick Start
 
 ### Option 1: Single-Process Mode (Recommended for Testing)
 
 ```bash
-# Start CARLA server (on Linux machine or same machine)
+# Start CARLA server
 ./CarlaUE4.sh
 
-# Run lane detection (in dev container or local environment)
-cd detection
+# Run lane keeping system
+cd simulation
 python main_modular.py --method cv --host localhost --port 2000
 ```
 
@@ -31,186 +30,174 @@ python main_modular.py --method cv --host localhost --port 2000
 cd detection
 python detection_server.py --method cv --port 5555
 
-# Terminal 2: Start CARLA client with web viewer
+# Terminal 2: Start CARLA simulation
+cd simulation
 python main_distributed_v2.py --detector-url tcp://localhost:5555 --viewer web --web-port 8080
 
 # Open browser: http://localhost:8080
 ```
 
-## 📋 System Requirements
-
-### For M1 Mac Development
-- **Docker Desktop** with Rosetta 2 enabled
-- **VSCode** with Dev Containers extension
-- **Remote Linux machine** running CARLA server (x86_64)
-
-### For Native Linux Development
-- **Ubuntu 18.04+** (x86_64)
-- **CARLA 0.9.15** simulator
-- **Python 3.10+**
-- **GPU** (optional, for deep learning)
-
 ## 📁 Project Structure
 
 ```
 ads_ld/
-├── simulation/                    # CARLA simulator integration ⭐
-│   ├── connection.py              # CARLA connection
-│   ├── vehicle.py                 # Vehicle management
-│   └── sensors.py                 # Camera sensor
+├── simulation/              ⭐ CARLA simulation & orchestration
+│   ├── main_modular.py      # Single-process entry point
+│   ├── main_distributed_v2.py  # Distributed system with web viewer
+│   ├── config.yaml          # Configuration
+│   │
+│   ├── connection.py        # CARLA connection
+│   ├── vehicle.py           # Vehicle control
+│   ├── sensors.py           # Camera sensors
+│   │
+│   ├── integration/         # System orchestration
+│   │   ├── orchestrator.py            # Single-process
+│   │   ├── distributed_orchestrator.py  # Multi-process
+│   │   ├── communication.py           # ZMQ communication
+│   │   ├── messages.py                # Message protocols
+│   │   └── visualization.py           # Visualization manager
+│   │
+│   ├── processing/          # Frame processing
+│   │   ├── frame_processor.py  # Processing pipeline
+│   │   ├── pd_controller.py    # PD controller
+│   │   └── metrics_logger.py   # Performance metrics
+│   │
+│   ├── ui/                  # User interface
+│   │   ├── web_viewer.py    # Web-based viewer (no X11!)
+│   │   ├── pygame_viewer.py  # Pygame viewer
+│   │   ├── keyboard_handler.py  # Keyboard controls
+│   │   └── video_recorder.py    # Video recording
+│   │
+│   └── utils/               # Utilities
+│       ├── lane_analyzer.py     # Lane analysis
+│       ├── visualizer.py        # Visualization helpers
+│       └── spectator_overlay.py  # CARLA spectator overlay
 │
-├── decision/                      # Control decisions ⭐
-│   ├── analyzer.py                # Lane analysis
-│   └── controller.py              # PD controller
-│
-├── detection/                     # Lane detection package
-│   ├── main_modular.py            # Single-process entry point ⭐
-│   ├── main_distributed_v2.py     # Distributed system with web viewer ⭐
-│   ├── detection_server.py        # Standalone detection server ⭐
-│   ├── config.yaml                # Configuration file
+├── detection/               ⭐ Pure lane detection
+│   ├── detection_server.py  # Standalone detection server
 │   │
-│   ├── core/                      # Core abstractions
-│   │   ├── interfaces.py          # Abstract base classes
-│   │   ├── models.py              # Data models (Lane, Metrics)
-│   │   ├── config.py              # Configuration management
-│   │   └── factory.py             # Factory pattern for detectors
+│   ├── core/                # Core abstractions
+│   │   ├── interfaces.py    # Abstract base classes
+│   │   ├── models.py        # Data models (Lane, Metrics)
+│   │   ├── config.py        # Configuration management
+│   │   └── factory.py       # Factory pattern
 │   │
-│   ├── detection_module/          # Lane detection wrapper
-│   │   └── detector.py            # Detection module
+│   ├── detection_module/    # Detection wrapper
+│   │   └── detector.py      # Detection module
 │   │
-│   ├── method/                    # Detection implementations
-│   │   ├── computer_vision/       # OpenCV-based detection
+│   ├── method/              # Detection implementations
+│   │   ├── computer_vision/      # OpenCV-based
 │   │   │   └── cv_lane_detector.py
-│   │   └── deep_learning/         # CNN-based detection
-│   │       ├── lane_net.py        # Network architectures
-│   │       └── lane_net_base.py   # Training/inference base
+│   │   └── deep_learning/        # CNN-based
+│   │       ├── lane_net.py
+│   │       └── lane_net_base.py
 │   │
-│   ├── integration/               # System integration
-│   │   ├── orchestrator.py        # Single-process orchestrator
-│   │   ├── distributed_orchestrator.py  # Multi-process orchestrator
-│   │   ├── communication.py       # ZMQ client/server
-│   │   ├── messages.py            # Message protocols
-│   │   └── visualization.py       # Visualization manager
-│   │
-│   ├── ui/                        # User interface components
-│   │   ├── web_viewer.py          # Web-based viewer (no X11!) ⭐
-│   │   ├── pygame_viewer.py       # Pygame viewer
-│   │   ├── keyboard_handler.py    # Keyboard controls
-│   │   └── video_recorder.py      # Video recording
-│   │
-│   ├── processing/                # Frame processing
-│   │   ├── frame_processor.py     # Frame processing pipeline
-│   │   ├── pd_controller.py       # PD controller
-│   │   └── metrics_logger.py      # Performance metrics
-│   │
-│   ├── utils/                     # Utilities
-│   │   ├── lane_analyzer.py       # Lane analysis
-│   │   ├── visualizer.py          # Visualization helpers
-│   │   └── spectator_overlay.py   # CARLA spectator overlay
-│   │
-│   ├── tests/                     # Test suite
-│   │   ├── test_connection.py     # CARLA connection tests
-│   │   └── test_setup.py          # Setup verification
-│   │
-│   └── scripts/                   # Utility scripts
-│       └── start_distributed_system.sh
+│   └── tests/               # Test suite
+│       ├── test_connection.py
+│       └── test_setup.py
 │
-├── docs/                          # Documentation
-│   ├── START_HERE.md              # 👈 Start here!
-│   ├── QUICK_START.md             # Quick start guide
-│   ├── ARCHITECTURE_DECISION.md   # Architecture rationale
-│   ├── MODULAR_ARCHITECTURE.md    # Architecture explanation
-│   ├── DEVCONTAINER_SETUP.md      # Dev container setup
-│   ├── MACOS_M1_SETUP.md          # M1 Mac specific setup
-│   └── DL_QUICKSTART.md           # Deep learning setup
+├── decision/                ⭐ Control decisions
+│   ├── analyzer.py          # Lane position analysis
+│   └── controller.py        # PD control logic
 │
-├── archive/                       # Deprecated files (for reference)
-│   ├── deprecated_main_files/     # Old entry points
-│   ├── old_temp_files/            # Old demo files
-│   └── deprecated_docs/           # Historical documentation
-│
-├── .devcontainer/                 # Dev container configuration
-│   ├── devcontainer.json          # VSCode configuration
-│   └── Dockerfile                 # Container definition
-│
-├── requirements.txt               # Python dependencies
-├── docker-compose.yml             # Docker compose configuration
-├── CLEANUP_SUMMARY.md             # Recent cleanup details
-└── README.md                      # This file
+└── docs/                    # Documentation
+    ├── START_HERE.md
+    ├── QUICK_START.md
+    ├── ARCHITECTURE_DECISION.md
+    └── ...
 ```
 
 ## 🎯 Architecture
 
-### Modular Design
-
-The system follows a clean **three-module architecture** with top-level separation:
+### Clean 3-Module Separation
 
 ```
-Project Root (ads_ld/)
-│
-├── simulation/             ← CARLA simulator integration
-│   • Connection management
-│   • Vehicle control
-│   • Camera sensors
-│
-├── decision/               ← Control decisions
-│   • Lane analysis
-│   • PD controller
-│   • Control logic
-│
-└── detection/              ← Lane detection & orchestration
-    • Detection methods (CV/DL)
-    • System orchestrator
-    • Integration layer
-
-┌─────────────────────────────────────────────────────────────┐
-│                Orchestrator (detection/)                     │
-│               (Coordinates all modules)                      │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                    simulation/                               │
+│              (CARLA Orchestration Layer)                     │
+│  • Runs CARLA simulation                                     │
+│  • Coordinates modules                                       │
+│  • Provides entry points                                     │
+└──────────────────────────────────────────────────────────────┘
          │                    │                    │
          ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌──────────────────┐
-│   simulation/   │  │   detection/    │  │    decision/     │
-│  (Root level)   │  │detection_module/│  │  (Root level)    │
-│                 │  │                 │  │                  │
-│ • Connection    │  │ • CV Detector   │  │ • Lane Analyzer  │
-│ • Vehicle       │  │ • DL Detector   │  │ • PD Controller  │
-│ • Camera        │  │ • Factory       │  │ • Control Logic  │
-└─────────────────┘  └─────────────────┘  └──────────────────┘
+┌────────────────┐  ┌───────────────────┐  ┌──────────────────┐
+│  simulation/   │  │   detection/      │  │    decision/     │
+│  (CARLA API)   │  │(Lane Detection)   │  │ (Control Logic)  │
+│                │  │                   │  │                  │
+│ • Connection   │  │ • CV Detection    │  │ • Lane Analysis  │
+│ • Vehicle      │  │ • DL Detection    │  │ • PD Controller  │
+│ • Sensors      │  │ • Pure algorithms │  │ • Steering       │
+└────────────────┘  └───────────────────┘  └──────────────────┘
 ```
 
-### Distributed Architecture (Production)
+### Module Responsibilities
 
-For production deployments, the detection can run on a separate process/machine:
+**`simulation/`** - CARLA Integration & Orchestration
+- Connects to CARLA simulator
+- Manages vehicles and sensors
+- Orchestrates data flow between modules
+- **Contains:** main entry points, orchestrators, UI
 
+**`detection/`** - Pure Lane Detection
+- Detects lanes from images (CV or DL)
+- No CARLA dependencies
+- Can run as standalone service
+- **Contains:** detection algorithms, detection server
+
+**`decision/`** - Control Decisions
+- Analyzes lane position
+- Generates steering commands
+- PD control logic
+- **Contains:** analyzer, controller
+
+## 🎮 Usage
+
+### Single-Process Mode
+
+```bash
+cd simulation
+python main_modular.py --method cv --host localhost --port 2000
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  CARLA Client Process                                        │
-│  • Vehicle control                                           │
-│  • Decision making                                           │
-│  • Visualization                                             │
-└─────────────────────────────────────────────────────────────┘
-                         │
-                         │ ZMQ (TCP)
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Detection Server Process (Can be remote GPU machine!)      │
-│  • Lane detection                                            │
-│  • Computer Vision or Deep Learning                          │
-│  • Optimized for GPU inference                               │
-└─────────────────────────────────────────────────────────────┘
+
+### Distributed Mode with Web Viewer
+
+```bash
+# Terminal 1: Detection server
+cd detection
+python detection_server.py --method cv --port 5555
+
+# Terminal 2: CARLA simulation
+cd simulation
+python main_distributed_v2.py \
+  --detector-url tcp://localhost:5555 \
+  --viewer web \
+  --web-port 8080
+```
+
+### Remote CARLA Server
+
+```bash
+cd simulation
+python main_modular.py --method cv --host 192.168.1.100 --port 2000
+```
+
+### Deep Learning Detection
+
+```bash
+cd simulation
+python main_modular.py --method dl --model path/to/model.pth
 ```
 
 ## 🔧 Configuration
 
-### Config File (`detection/config.yaml`)
+Edit `simulation/config.yaml`:
 
 ```yaml
 # CARLA Connection
 carla:
-  host: "localhost"        # CARLA server host
-  port: 2000               # CARLA server port
+  host: "localhost"
+  port: 2000
   vehicle_type: "vehicle.tesla.model3"
 
 # Camera Settings
@@ -218,92 +205,19 @@ camera:
   width: 800
   height: 600
   fov: 90
-  position: [2.5, 0.0, 1.0]     # [x, y, z] relative to vehicle
-  rotation: [-15.0, 0.0, 0.0]   # [pitch, yaw, roll]
-
-# Lane Detection
-detection:
-  method: "cv"             # "cv" or "dl"
-
-  cv:
-    roi_top_ratio: 0.4
-    canny_low: 50
-    canny_high: 150
-
-  dl:
-    model_path: null       # Path to trained model
-    input_size: [256, 256]
+  position: [2.5, 0.0, 1.0]
+  rotation: [-15.0, 0.0, 0.0]
 
 # Controller
 controller:
-  kp: 0.5                  # Proportional gain
-  kd: 0.1                  # Derivative gain
-  max_steering: 0.8        # Maximum steering angle
-
-# Lane Analysis
-analyzer:
-  drift_threshold: 50      # Pixels
-  departure_threshold: 150 # Pixels
-
-# Visualization
-visualization:
-  show_spectator_overlay: true
-  follow_with_spectator: true
-```
-
-## 🎮 Usage Examples
-
-### 1. Single-Process with Computer Vision
-
-```bash
-cd detection
-python main_modular.py --method cv --host localhost --port 2000
-```
-
-### 2. Single-Process with Deep Learning
-
-```bash
-cd detection
-python main_modular.py --method dl --model path/to/model.pth
-```
-
-### 3. Distributed with Web Viewer (Best for Docker/Remote)
-
-```bash
-# Terminal 1: Detection server
-python detection_server.py --method cv --port 5555
-
-# Terminal 2: CARLA client with web viewer
-python main_distributed_v2.py \
-  --detector-url tcp://localhost:5555 \
-  --viewer web \
-  --web-port 8080
-
-# Open browser: http://localhost:8080
-```
-
-### 4. Distributed with Remote Detection Server
-
-```bash
-# On GPU machine: Start detection server
-python detection_server.py --method dl --port 5555
-
-# On local machine: Run CARLA client
-python main_distributed_v2.py \
-  --detector-url tcp://192.168.1.100:5555 \
-  --host localhost \
-  --port 2000
-```
-
-### 5. No Display Mode (Headless)
-
-```bash
-python main_modular.py --method cv --no-display
+  kp: 0.5
+  kd: 0.1
+  max_steering: 0.8
 ```
 
 ## 🧪 Testing
 
-### Test Without CARLA (Standalone)
+### Test Without CARLA
 
 ```bash
 cd detection
@@ -320,100 +234,12 @@ python tests/test_connection.py --host localhost --port 2000
 ### Test Detection Server
 
 ```bash
-# Terminal 1: Start server
+# Terminal 1
+cd detection
 python detection_server.py --port 5555
 
-# Terminal 2: Test client
-python -c "
-from integration.communication import DetectionClient
-from integration.messages import ImageMessage
-import numpy as np
-import time
-
-client = DetectionClient('tcp://localhost:5555', timeout_ms=1000)
-image = np.zeros((600, 800, 3), dtype=np.uint8)
-msg = ImageMessage(image=image, timestamp=time.time(), frame_id=0)
-result = client.detect(msg)
-print(f'Detection result: {result}')
-client.close()
-"
-```
-
-## 🐛 Troubleshooting
-
-### 1. "Cannot import carla"
-
-**Inside Dev Container:**
-```bash
-# Check Python path
-echo $PYTHONPATH
-
-# Should include: /opt/carla/PythonAPI/carla
-
-# Rebuild container if needed
-# VSCode: Cmd+Shift+P → "Dev Containers: Rebuild Container"
-```
-
-### 2. "Connection refused" to CARLA
-
-**Check CARLA is running:**
-```bash
-# On CARLA machine
-ps aux | grep Carla
-netstat -tuln | grep 2000
-```
-
-**Check network connectivity:**
-```bash
-# From your machine
-ping <CARLA_HOST>
-nc -zv <CARLA_HOST> 2000
-```
-
-### 3. "Detection timeout" in Distributed Mode
-
-**Check detection server:**
-```bash
-# Is server running?
-ps aux | grep detection_server
-
-# Check logs
-python detection_server.py --method cv --port 5555
-```
-
-**Check ZMQ connection:**
-```bash
-# Test with netcat
-nc -zv localhost 5555
-```
-
-### 4. Web Viewer Not Loading
-
-**Check Flask server:**
-```bash
-# Is port available?
-lsof -i :8080
-
-# Try different port
-python main_distributed_v2.py --web-port 8081
-```
-
-### 5. Slow Performance on M1 Mac
-
-This is expected due to x86_64 emulation. Optimizations:
-
-```bash
-# Reduce camera resolution
-# Edit config.yaml:
-camera:
-  width: 640
-  height: 480
-
-# Use low quality on CARLA server
-./CarlaUE4.sh -quality-level=Low
-
-# Use web viewer (lighter than OpenCV window)
-python main_distributed_v2.py --viewer web
+# Terminal 2
+python -c "from simulation.integration.communication import DetectionClient; print('✓ Works')"
 ```
 
 ## 🔍 Keyboard Controls
@@ -429,131 +255,102 @@ When running with visualization:
 
 ## 📊 Performance Metrics
 
-The system logs real-time performance metrics:
-
 ```
 Frame 00150 | FPS: 28.5 | Lanes: LR | Steering: +0.123 | Timeouts: 0
 ```
 
-- **FPS**: Frames per second
-- **Lanes**: Detected lanes (L=left, R=right, -=not detected)
-- **Steering**: Control output (-1.0 to +1.0)
-- **Timeouts**: Detection timeouts (distributed mode only)
+## 📋 System Requirements
+
+### For M1 Mac Development
+- Docker Desktop with Rosetta 2 enabled
+- VSCode with Dev Containers extension
+- Remote Linux machine running CARLA server
+
+### For Native Linux Development
+- Ubuntu 18.04+
+- CARLA 0.9.15+ simulator
+- Python 3.10+
+- GPU (optional, for deep learning)
 
 ## 🚀 Development Setup (M1 Mac)
 
-### Using Dev Container (Recommended)
-
-1. **Install Prerequisites:**
-   - Docker Desktop for Mac
-   - VSCode with Dev Containers extension
-
-2. **Enable Rosetta 2 in Docker:**
-   - Docker Desktop → Settings → Features in Development
-   - ✅ "Use Rosetta for x86/amd64 emulation on Apple Silicon"
-
-3. **Open in Container:**
+1. **Enable Rosetta 2 in Docker**
+2. **Open in Dev Container:**
    ```bash
-   cd /path/to/ads_ld
+   cd ads_ld
    code .
    # VSCode: Cmd+Shift+P → "Reopen in Container"
    ```
-
-4. **Connect to Remote CARLA:**
+3. **Connect to Remote CARLA:**
    ```bash
-   # In VSCode terminal (inside container)
-   cd detection
+   cd simulation
    python main_modular.py --host <LINUX_IP> --port 2000
    ```
 
-See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) for detailed setup.
+See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) for details.
 
 ## 📚 Documentation
 
 | Document | Description |
 |----------|-------------|
-| [docs/START_HERE.md](docs/START_HERE.md) | 👈 **New to the project? Start here!** |
-| [docs/QUICK_START.md](docs/QUICK_START.md) | Quick start guide |
-| [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md) | Why this architecture? |
-| [docs/MODULAR_ARCHITECTURE.md](docs/MODULAR_ARCHITECTURE.md) | Detailed architecture explanation |
-| [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) | Dev container setup for M1 Mac |
-| [docs/MACOS_M1_SETUP.md](docs/MACOS_M1_SETUP.md) | M1 Mac specific instructions |
-| [docs/DL_QUICKSTART.md](docs/DL_QUICKSTART.md) | Deep learning model setup |
-| [detection/DISTRIBUTED_ARCHITECTURE.md](detection/DISTRIBUTED_ARCHITECTURE.md) | Distributed system guide |
-| [detection/SYSTEM_OVERVIEW.md](detection/SYSTEM_OVERVIEW.md) | System components overview |
-| [detection/VISUALIZATION_GUIDE.md](detection/VISUALIZATION_GUIDE.md) | Visualization options |
-| [CLEANUP_SUMMARY.md](CLEANUP_SUMMARY.md) | Recent codebase cleanup details |
+| [docs/START_HERE.md](docs/START_HERE.md) | 👈 Start here! |
+| [simulation/README.md](simulation/README.md) | Simulation module guide |
+| [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md) | Architecture rationale |
+| [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) | Dev container setup |
+| [simulation/VISUALIZATION_GUIDE.md](simulation/VISUALIZATION_GUIDE.md) | Visualization options |
 
 ## 🎓 For Students
 
 This project demonstrates:
 
-- ✅ **Clean Architecture**: Modular design with single responsibility
+- ✅ **Clean Architecture**: Separation of concerns
 - ✅ **Design Patterns**: Factory, Strategy, Observer
-- ✅ **Process Communication**: ZMQ for inter-process messaging
-- ✅ **Configuration Management**: YAML-based configuration
+- ✅ **Distributed Systems**: ZMQ communication
 - ✅ **Multiple Algorithms**: CV and DL approaches
 - ✅ **Production Ready**: Error handling, logging, metrics
-- ✅ **Docker & DevOps**: Containerized development environment
 
-## 🤝 Contributing
+## 🆘 Quick Reference
 
-When adding new features:
+### Entry Points
 
-1. Follow the modular architecture
-2. Maintain separation of concerns (CARLA / Detection / Decision)
-3. Use the factory pattern for new detectors
-4. Add tests in `detection/tests/`
-5. Update relevant documentation
+| File | Purpose | Location |
+|------|---------|----------|
+| `main_modular.py` | Single-process system | `simulation/` |
+| `main_distributed_v2.py` | Distributed system | `simulation/` |
+| `detection_server.py` | Standalone detection | `detection/` |
 
-## 🔗 Related Projects
+### Command Templates
 
-This project is designed to work with:
+```bash
+# Local testing
+cd simulation
+python main_modular.py --method cv
 
-- **CARLA Simulator** (0.9.15): https://carla.org
-- **PiRacer** (future integration): Real vehicle deployment
+# Remote CARLA
+cd simulation
+python main_modular.py --method cv --host 192.168.1.100
+
+# Distributed with web viewer
+cd detection && python detection_server.py --port 5555 &
+cd simulation && python main_distributed_v2.py --viewer web --web-port 8080
+
+# Headless mode
+cd simulation
+python main_modular.py --method cv --no-display
+```
+
+## ✅ Why This Structure?
+
+1. **`simulation/` contains orchestration** - Everything related to running CARLA simulations
+2. **`detection/` is pure algorithms** - Can be used in any project, no CARLA dependency
+3. **`decision/` is reusable logic** - Works with any detection system
+4. **Clear responsibilities** - Each module has ONE job
+5. **Easy to test** - Pure functions, no entangled dependencies
 
 ## 📝 License
 
 See [LICENSE](LICENSE) file.
 
-## 🆘 Getting Help
-
-1. **Start with docs**: Check [docs/START_HERE.md](docs/START_HERE.md)
-2. **Check troubleshooting**: See sections above
-3. **Architecture questions**: See [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md)
-4. **M1 Mac issues**: See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md)
-
-## ✅ Quick Reference
-
-### Entry Points
-
-| File | Use Case |
-|------|----------|
-| `main_modular.py` | Single-process, easy testing |
-| `main_distributed_v2.py` | Multi-process, production, web viewer |
-| `detection_server.py` | Standalone detection service |
-
-### Command Templates
-
-```bash
-# Local development
-python main_modular.py --method cv
-
-# Remote CARLA
-python main_modular.py --method cv --host 192.168.1.100
-
-# Distributed with web viewer (Docker/Remote friendly)
-python detection_server.py --port 5555 &
-python main_distributed_v2.py --viewer web --web-port 8080
-
-# Headless mode
-python main_modular.py --method cv --no-display
-
-# Custom config
-python main_modular.py --config my_config.yaml
-```
-
 ---
 
-**Ready to start?** 👉 Open [docs/START_HERE.md](docs/START_HERE.md)
+**Ready to start?** 👉 Run `cd simulation && python main_modular.py --method cv`
