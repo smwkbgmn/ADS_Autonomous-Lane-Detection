@@ -180,27 +180,28 @@ class DetectionClient:
     Used by CARLA client to communicate with detection server.
     """
 
-    def __init__(self, server_url: str = "tcp://localhost:5555", timeout_ms: int = 1000):
+    def __init__(self, server_url: str = "tcp://localhost:5555", timeout_ms: int = 1000,
+                 max_retries: int = 5, retry_delay: float = 2.0):
         """
         Initialize detection client.
 
         Args:
             server_url: ZMQ URL of detection server
             timeout_ms: Request timeout in milliseconds
+            max_retries: Maximum connection retry attempts
+            retry_delay: Delay between retry attempts (seconds)
         """
         self.server_url = server_url
         self.timeout_ms = timeout_ms
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
 
-        # Create ZMQ context and socket
+        # Create ZMQ context
         self.context = zmq.Context()
-        self.socket = self.context.socket(zmq.REQ)  # REQ-REP pattern
-        self.socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
-        self.socket.setsockopt(zmq.SNDTIMEO, timeout_ms)
-        self.socket.setsockopt(zmq.LINGER, 0)
+        self.socket = None
 
-        print(f"Connecting to detection server at {server_url}...")
-        self.socket.connect(server_url)
-        print(f"✓ Connected to detection server")
+        # Try to connect with retries
+        self._connect_with_retry()
 
     def detect(self, image_msg: ImageMessage) -> Optional[DetectionMessage]:
         """
@@ -235,17 +236,94 @@ class DetectionClient:
             self._reconnect()
             return None
 
+    def _create_socket(self):
+        """Create and configure a new ZMQ socket."""
+        if self.socket:
+            try:
+                self.socket.close()
+            except:
+                pass
+
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
+        self.socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
+        self.socket.setsockopt(zmq.LINGER, 0)
+        self.socket.connect(self.server_url)
+
+    def _test_connection(self) -> bool:
+        """
+        Test if server is actually reachable by sending a ping message.
+
+        Returns:
+            True if server responds, False otherwise
+        """
+        try:
+            # Send a small test message (ping)
+            test_msg = json.dumps({"type": "ping"}).encode('utf-8')
+            self.socket.send(test_msg)
+
+            # Wait for response
+            response = self.socket.recv()
+            response_data = json.loads(response.decode('utf-8'))
+
+            if response_data.get("type") == "pong":
+                return True
+            else:
+                print(f"  ⚠ Unexpected response: {response_data}")
+                return False
+
+        except zmq.Again:
+            # Timeout - server not responding
+            return False
+        except Exception as e:
+            print(f"  ⚠ Connection test error: {e}")
+            return False
+
+    def _connect_with_retry(self):
+        """Connect to server with retry logic."""
+        print(f"\n[DetectionClient] Connecting to detection server...")
+        print(f"  URL: {self.server_url}")
+        print(f"  Timeout: {self.timeout_ms}ms")
+        print(f"  Max retries: {self.max_retries}")
+
+        for attempt in range(1, self.max_retries + 1):
+            print(f"\n  Attempt {attempt}/{self.max_retries}:")
+            print(f"    Creating socket...")
+
+            # Create new socket
+            self._create_socket()
+            print(f"    ✓ Socket created")
+
+            # Test connection
+            print(f"    Testing connection (sending ping)...")
+            if self._test_connection():
+                print(f"\n✓ Successfully connected to detection server!")
+                print(f"  Server responded on attempt {attempt}")
+                return
+
+            # Failed - socket is now in bad state, will recreate on next attempt
+            print(f"    ✗ No response from server")
+
+            if attempt < self.max_retries:
+                print(f"    Waiting {self.retry_delay}s before retry...")
+                time.sleep(self.retry_delay)
+
+        # All retries exhausted
+        raise ConnectionError(
+            f"\n✗ Failed to connect to detection server after {self.max_retries} attempts\n"
+            f"  URL: {self.server_url}\n"
+            f"  Make sure detection server is running:\n"
+            f"    python detection_server.py --port {self.server_url.split(':')[-1]}\n"
+        )
+
     def _reconnect(self):
         """Reconnect socket after error."""
+        print("  [DetectionClient] Reconnecting socket...")
         try:
-            self.socket.close()
-            self.socket = self.context.socket(zmq.REQ)
-            self.socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
-            self.socket.setsockopt(zmq.SNDTIMEO, self.timeout_ms)
-            self.socket.setsockopt(zmq.LINGER, 0)
-            self.socket.connect(self.server_url)
-        except:
-            pass
+            self._create_socket()
+            print("  ✓ Socket recreated")
+        except Exception as e:
+            print(f"  ✗ Reconnect failed: {e}")
 
     def close(self):
         """Close connection."""
@@ -293,11 +371,25 @@ class DetectionServer:
 
         try:
             while self.running:
-                # Receive image
+                # Receive message
                 message_bytes = self.socket.recv()
+
+                # Check if this is a ping message (connection test)
+                try:
+                    # Try to decode as JSON first (ping messages are plain JSON)
+                    test_data = json.loads(message_bytes.decode('utf-8'))
+                    if test_data.get("type") == "ping":
+                        # Respond with pong
+                        pong_response = json.dumps({"type": "pong"}).encode('utf-8')
+                        self.socket.send(pong_response)
+                        continue
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    # Not a ping message, continue with normal image processing
+                    pass
+
                 self.request_count += 1
 
-                # Deserialize
+                # Deserialize image message
                 image_msg = ImageSerializer.deserialize(message_bytes)
 
                 # Process detection (call user's detection function)
