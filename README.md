@@ -12,25 +12,15 @@ A modular, production-ready lane keeping system for CARLA simulator with clean s
 
 ## 🚀 Quick Start
 
-### Option 1: Single-Process Mode (Recommended for Testing)
-
 ```bash
-# Start CARLA server
+# Terminal 1: Start CARLA server
 ./CarlaUE4.sh
 
-# Run lane keeping system
-cd simulation
-python main_modular.py --method cv --host localhost --port 2000
-```
-
-### Option 2: Distributed Mode (Recommended for Production)
-
-```bash
-# Terminal 1: Start detection server
+# Terminal 2: Start detection server
 cd detection
 python detection_server.py --method cv --port 5555
 
-# Terminal 2: Start CARLA simulation
+# Terminal 3: Start CARLA simulation with web viewer
 cd simulation
 python main_distributed_v2.py --detector-url tcp://localhost:5555 --viewer web --web-port 8080
 
@@ -42,8 +32,7 @@ python main_distributed_v2.py --detector-url tcp://localhost:5555 --viewer web -
 ```
 ads_ld/
 ├── simulation/              ⭐ CARLA simulation & orchestration
-│   ├── main_modular.py      # Single-process entry point
-│   ├── main_distributed_v2.py  # Distributed system with web viewer
+│   ├── main_distributed_v2.py  # Main entry point (distributed system)
 │   ├── config.yaml          # Configuration
 │   │
 │   ├── connection.py        # CARLA connection
@@ -51,8 +40,7 @@ ads_ld/
 │   ├── sensors.py           # Camera sensors
 │   │
 │   ├── integration/         # System orchestration
-│   │   ├── orchestrator.py            # Single-process
-│   │   ├── distributed_orchestrator.py  # Multi-process
+│   │   ├── distributed_orchestrator.py  # Multi-process orchestrator
 │   │   ├── communication.py           # ZMQ communication
 │   │   ├── messages.py                # Message protocols
 │   │   └── visualization.py           # Visualization manager
@@ -100,7 +88,7 @@ ads_ld/
 │   ├── analyzer.py          # Lane position analysis
 │   └── controller.py        # PD control logic
 │
-└── docs/                    # Documentation
+└── .docs/                   # Documentation
     ├── START_HERE.md
     ├── QUICK_START.md
     ├── ARCHITECTURE_DECISION.md
@@ -153,21 +141,14 @@ ads_ld/
 
 ## 🎮 Usage
 
-### Single-Process Mode
+### Basic Usage (Local)
 
 ```bash
-cd simulation
-python main_modular.py --method cv --host localhost --port 2000
-```
-
-### Distributed Mode with Web Viewer
-
-```bash
-# Terminal 1: Detection server
+# Terminal 1: Start detection server
 cd detection
 python detection_server.py --method cv --port 5555
 
-# Terminal 2: CARLA simulation
+# Terminal 2: Start CARLA simulation with web viewer
 cd simulation
 python main_distributed_v2.py \
   --detector-url tcp://localhost:5555 \
@@ -178,15 +159,30 @@ python main_distributed_v2.py \
 ### Remote CARLA Server
 
 ```bash
+# Terminal 1: Detection server (on GPU machine)
+cd detection
+python detection_server.py --method cv --port 5555
+
+# Terminal 2: CARLA simulation (on CARLA machine)
 cd simulation
-python main_modular.py --method cv --host 192.168.1.100 --port 2000
+python main_distributed_v2.py \
+  --detector-url tcp://gpu-server-ip:5555 \
+  --carla-host localhost \
+  --carla-port 2000 \
+  --viewer web \
+  --web-port 8080
 ```
 
 ### Deep Learning Detection
 
 ```bash
+# Terminal 1: DL detection server
+cd detection
+python detection_server.py --method dl --model path/to/model.pth --port 5555
+
+# Terminal 2: CARLA simulation
 cd simulation
-python main_modular.py --method dl --model path/to/model.pth
+python main_distributed_v2.py --detector-url tcp://localhost:5555 --viewer web
 ```
 
 ## 🔧 Configuration
@@ -281,23 +277,33 @@ Frame 00150 | FPS: 28.5 | Lanes: LR | Steering: +0.123 | Timeouts: 0
    code .
    # VSCode: Cmd+Shift+P → "Reopen in Container"
    ```
-3. **Connect to Remote CARLA:**
+3. **Start detection server and connect to Remote CARLA:**
    ```bash
+   # Terminal 1: Detection server
+   cd detection
+   python detection_server.py --method cv --port 5555
+
+   # Terminal 2: CARLA simulation
    cd simulation
-   python main_modular.py --host <LINUX_IP> --port 2000
+   python main_distributed_v2.py \
+     --detector-url tcp://localhost:5555 \
+     --carla-host <LINUX_IP> \
+     --carla-port 2000 \
+     --viewer web
    ```
 
-See [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) for details.
+See [.docs/DEVCONTAINER_SETUP.md](.docs/DEVCONTAINER_SETUP.md) for details.
 
 ## 📚 Documentation
 
 | Document | Description |
 |----------|-------------|
-| [docs/START_HERE.md](docs/START_HERE.md) | 👈 Start here! |
+| [.docs/START_HERE.md](.docs/START_HERE.md) | 👈 Start here! |
 | [simulation/README.md](simulation/README.md) | Simulation module guide |
-| [docs/ARCHITECTURE_DECISION.md](docs/ARCHITECTURE_DECISION.md) | Architecture rationale |
-| [docs/DEVCONTAINER_SETUP.md](docs/DEVCONTAINER_SETUP.md) | Dev container setup |
-| [simulation/VISUALIZATION_GUIDE.md](simulation/VISUALIZATION_GUIDE.md) | Visualization options |
+| [.docs/ARCHITECTURE_DECISION.md](.docs/ARCHITECTURE_DECISION.md) | Architecture rationale |
+| [.docs/DEVCONTAINER_SETUP.md](.docs/DEVCONTAINER_SETUP.md) | Dev container setup |
+| [.docs/VISUALIZATION_GUIDE.md](.docs/VISUALIZATION_GUIDE.md) | Visualization options |
+| [.docs/DISTRIBUTED_ARCHITECTURE.md](.docs/DISTRIBUTED_ARCHITECTURE.md) | Distributed system design |
 
 ## 🎓 For Students
 
@@ -315,28 +321,30 @@ This project demonstrates:
 
 | File | Purpose | Location |
 |------|---------|----------|
-| `main_modular.py` | Single-process system | `simulation/` |
-| `main_distributed_v2.py` | Distributed system | `simulation/` |
-| `detection_server.py` | Standalone detection | `detection/` |
+| `main_distributed_v2.py` | Main system entry point | `simulation/` |
+| `detection_server.py` | Standalone detection server | `detection/` |
 
 ### Command Templates
 
 ```bash
-# Local testing
-cd simulation
-python main_modular.py --method cv
+# Start detection server (Terminal 1)
+cd detection && python detection_server.py --method cv --port 5555
 
-# Remote CARLA
-cd simulation
-python main_modular.py --method cv --host 192.168.1.100
+# Start CARLA simulation (Terminal 2)
+cd simulation && python main_distributed_v2.py \
+  --detector-url tcp://localhost:5555 \
+  --viewer web \
+  --web-port 8080
 
-# Distributed with web viewer
-cd detection && python detection_server.py --port 5555 &
-cd simulation && python main_distributed_v2.py --viewer web --web-port 8080
+# OpenCV viewer instead of web
+cd simulation && python main_distributed_v2.py \
+  --detector-url tcp://localhost:5555 \
+  --viewer opencv
 
-# Headless mode
-cd simulation
-python main_modular.py --method cv --no-display
+# Pygame viewer
+cd simulation && python main_distributed_v2.py \
+  --detector-url tcp://localhost:5555 \
+  --viewer pygame
 ```
 
 ## ✅ Why This Structure?
@@ -353,4 +361,4 @@ See [LICENSE](LICENSE) file.
 
 ---
 
-**Ready to start?** 👉 Run `cd simulation && python main_modular.py --method cv`
+**Ready to start?** 👉 See [Quick Start](#-quick-start) above
