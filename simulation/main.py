@@ -63,10 +63,10 @@ def main():
     parser.add_argument("--spawn-point", type=int, default=None)
 
     # Detection server
-    parser.add_argument("--detector-url", type=str, default="tcp://localhost:5555")
+    parser.add_argument("--detector-url", type=str, default="tcp://localhost:5556")
     parser.add_argument("--detector-timeout", type=int, default=1000)
 
-    # Visualization options ⭐ NEW
+    # Visualization options
     parser.add_argument(
         "--viewer",
         type=str,
@@ -78,7 +78,28 @@ def main():
         "--web-port", type=int, default=8080, help="Port for web viewer"
     )
     parser.add_argument("--no-display", action="store_true")
-    parser.add_argument("--no-autopilot", action="store_true")
+    parser.add_argument("--autopilot", action="store_true")
+    parser.add_argument(
+        "--no-sync", action="store_true", help="Disable synchronous mode"
+    )
+    parser.add_argument(
+        "--force-throttle",
+        type=float,
+        default=None,
+        help="Force constant throttle (for testing)",
+    )
+    parser.add_argument(
+        "--base-throttle",
+        type=float,
+        default=0.3,
+        help="Base throttle during initialization/failures (default: 0.3)",
+    )
+    parser.add_argument(
+        "--warmup-frames",
+        type=int,
+        default=50,
+        help="Frames to use base throttle before full control (default: 50)",
+    )
 
     args = parser.parse_args()
 
@@ -121,17 +142,29 @@ def main():
         )
 
     # Initialize CARLA
-    print("\n[1/4] Connecting to CARLA...")
+    print("\n[1/5] Connecting to CARLA...")
     carla_conn = CARLAConnection(carla_host, carla_port)
     if not carla_conn.connect():
         return 1
 
-    print("\n[2/4] Spawning vehicle...")
+    # Setup world (synchronous mode, cleanup, traffic lights)
+    print("\n[2/5] Setting up world environment...")
+    sync_mode = not args.no_sync
+    if sync_mode:
+        carla_conn.setup_synchronous_mode(enabled=True, fixed_delta_seconds=0.05)
+    else:
+        print("✓ Running in asynchronous mode (--no-sync)")
+
+    # World cleanup (uncomment if needed)
+    # carla_conn.cleanup_world()
+    # carla_conn.set_all_traffic_lights_green()
+
+    print("\n[3/5] Spawning vehicle...")
     vehicle_mgr = VehicleManager(carla_conn.get_world())
     if not vehicle_mgr.spawn_vehicle(config.carla.vehicle_type, args.spawn_point):
         return 1
 
-    print("\n[3/4] Setting up camera...")
+    print("\n[4/5] Setting up camera...")
     camera = CameraSensor(carla_conn.get_world(), vehicle_mgr.get_vehicle())
     if not camera.setup_camera(
         width=config.camera.width,
@@ -142,23 +175,34 @@ def main():
     ):
         return 1
 
-    print("\n[4/4] Connecting to detection server...")
+    print("\n[5/5] Connecting to detection server...")
     try:
         detector = DetectionClient(args.detector_url, args.detector_timeout)
     except Exception as e:
         print(f"✗ Failed to connect: {e}")
         return 1
 
-    # Initialize decision controller
+    # Initialize decision controller with adaptive throttle
+    throttle_policy = {
+        "base": config.throttle_policy.base,
+        "min": config.throttle_policy.min,
+        "steer_threshold": config.throttle_policy.steer_threshold,
+        "steer_max": config.throttle_policy.steer_max,
+    }
+
     controller = DecisionController(
         image_width=config.camera.width,
         image_height=config.camera.height,
         kp=config.controller.kp,
         kd=config.controller.kd,
+        throttle_policy=throttle_policy,
+    )
+    print(
+        f"✓ Adaptive throttle enabled: base={config.throttle_policy.base}, min={config.throttle_policy.min}"
     )
 
     # Enable autopilot
-    if not args.no_autopilot:
+    if args.autopilot:
         vehicle_mgr.set_autopilot(True)
         print("\n✓ Autopilot enabled")
 
@@ -173,9 +217,21 @@ def main():
     frame_count = 0
     timeouts = 0
     last_print = time.time()
+    warmup_complete = False
+
+    # Print initialization strategy
+    print(f"\n🚀 Initialization Strategy:")
+    print(
+        f"   Warmup: {args.warmup_frames} frames with base throttle ({args.base_throttle})"
+    )
+    print(f"   Then: Full lane-keeping control with adaptive throttle")
 
     try:
         while True:
+            # Tick the world (required in synchronous mode)
+            if sync_mode:
+                carla_conn.get_world().tick()
+
             # Get image
             image = camera.get_latest_image()
             if image is None:
@@ -187,19 +243,51 @@ def main():
             )
             detection = detector.detect(image_msg)
 
+            # Determine if we're still in warmup phase
+            in_warmup = frame_count < args.warmup_frames
+
             if detection is None:
                 timeouts += 1
+                # During warmup or timeout: use base throttle to keep moving
                 control = ControlMessage(
-                    steering=0.0, throttle=0.0, brake=0.3, mode=ControlMode.LANE_KEEPING
+                    steering=0.0,
+                    throttle=args.base_throttle,  # Changed from 0.0 to base_throttle
+                    brake=0.0,  # Changed from 0.3 to 0.0
+                    mode=ControlMode.LANE_KEEPING,
                 )
+                if frame_count < 5:  # Print first few timeouts
+                    print(
+                        f"⚠ Detection timeout on frame {frame_count} - using base throttle"
+                    )
             else:
                 control = controller.process_detection(detection)
 
             # Apply control
             if not vehicle_mgr.is_autopilot_enabled():
-                vehicle_mgr.apply_control(
-                    control.steering, control.throttle, control.brake
-                )
+                # Determine final throttle
+                if args.force_throttle is not None:
+                    # Override for testing
+                    throttle = args.force_throttle
+                elif in_warmup:
+                    # During warmup: blend base throttle with computed steering
+                    throttle = args.base_throttle
+                    if frame_count == args.warmup_frames - 1:
+                        warmup_complete = True
+                        print(
+                            f"\n✅ Warmup complete! Switching to full adaptive control.\n"
+                        )
+                else:
+                    # After warmup: use adaptive throttle from controller
+                    throttle = control.throttle
+
+                vehicle_mgr.apply_control(control.steering, throttle, control.brake)
+                if frame_count < 5 or (
+                    in_warmup and frame_count % 10 == 0
+                ):  # Print during warmup
+                    mode = "WARMUP" if in_warmup else "ACTIVE"
+                    print(
+                        f"[{mode}] Frame {frame_count:3d}: steering={control.steering:+.3f}, throttle={throttle:.3f}, brake={control.brake:.3f}"
+                    )
 
             # Visualize
             if not args.no_display:
@@ -240,7 +328,7 @@ def main():
                 )
                 cv2.putText(
                     vis_image,
-                    f"Steering: {control.steering:.3f}",
+                    f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.3f}",
                     (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
