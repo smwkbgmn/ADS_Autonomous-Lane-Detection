@@ -61,6 +61,6 @@ htmlcov/
 Thumbs.db
 
 # User Specific
-.claude
-.devcontainer
-.vscode
+.claude/
+.devcontainer/
+.vscode/
