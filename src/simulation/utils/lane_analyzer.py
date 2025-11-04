@@ -7,18 +7,7 @@ import numpy as np
 from typing import Tuple, Dict
 from enum import Enum
 
-from detection.core.models import Lane, LaneMetrics
-from detection.core.models import LaneDepartureStatus as CoreLaneDepartureStatus
-
-
-class LaneDepartureStatus(Enum):
-    """Enum for lane departure status."""
-    CENTERED = "centered"
-    LEFT_DRIFT = "left_drift"
-    RIGHT_DRIFT = "right_drift"
-    LEFT_DEPARTURE = "left_departure"
-    RIGHT_DEPARTURE = "right_departure"
-    NO_LANES = "no_lanes"
+from detection.core.models import Lane, LaneMetrics, LaneDepartureStatus
 
 
 class LaneAnalyzer:
@@ -295,9 +284,6 @@ class LaneAnalyzer:
         if lateral_offset_pixels is not None and lane_width_pixels is not None and lane_width_pixels > 0:
             lateral_offset_normalized = lateral_offset_pixels / lane_width_pixels
 
-        # Convert local enum to core enum
-        core_status = self._convert_departure_status(departure_status)
-
         # Create LaneMetrics object
         return LaneMetrics(
             vehicle_center_x=float(self.vehicle_center_x),
@@ -307,23 +293,11 @@ class LaneAnalyzer:
             lateral_offset_meters=lateral_offset_meters,
             lateral_offset_normalized=lateral_offset_normalized,
             heading_angle_deg=heading_angle_deg,
-            departure_status=core_status,
+            departure_status=departure_status,
             has_left_lane=(left_lane is not None),
             has_right_lane=(right_lane is not None),
             has_both_lanes=(left_lane is not None and right_lane is not None)
         )
-
-    def _convert_departure_status(self, status: LaneDepartureStatus) -> CoreLaneDepartureStatus:
-        """Convert local LaneDepartureStatus to core LaneDepartureStatus."""
-        mapping = {
-            LaneDepartureStatus.CENTERED: CoreLaneDepartureStatus.CENTERED,
-            LaneDepartureStatus.LEFT_DRIFT: CoreLaneDepartureStatus.LEFT_DRIFT,
-            LaneDepartureStatus.RIGHT_DRIFT: CoreLaneDepartureStatus.RIGHT_DRIFT,
-            LaneDepartureStatus.LEFT_DEPARTURE: CoreLaneDepartureStatus.LEFT_DEPARTURE,
-            LaneDepartureStatus.RIGHT_DEPARTURE: CoreLaneDepartureStatus.RIGHT_DEPARTURE,
-            LaneDepartureStatus.NO_LANES: CoreLaneDepartureStatus.UNKNOWN
-        }
-        return mapping.get(status, CoreLaneDepartureStatus.UNKNOWN)
 
     def get_steering_correction(self,
                                 left_lane: Lane | Tuple[int, int, int, int] | None,

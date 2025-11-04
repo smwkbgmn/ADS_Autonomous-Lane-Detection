@@ -11,7 +11,7 @@ from simulation.integration.messages import (
     LaneMessage,
     ControlMode,
 )
-from .analyzer import LaneAnalyzer
+from simulation.utils.lane_analyzer import LaneAnalyzer
 from simulation.processing.pd_controller import PDController
 
 

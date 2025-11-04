@@ -17,6 +17,7 @@ class LaneDepartureStatus(Enum):
     RIGHT_DRIFT = "Drifting Right"
     LEFT_DEPARTURE = "LEFT DEPARTURE!"
     RIGHT_DEPARTURE = "RIGHT DEPARTURE!"
+    NO_LANES = "No Lanes Detected"
 
 
 @dataclass
