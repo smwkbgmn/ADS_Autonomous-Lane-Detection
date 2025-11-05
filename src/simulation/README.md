@@ -83,10 +83,12 @@ simulation/
 ./CarlaUE4.sh
 
 # Terminal 2: Start simulation with integrated LKAS
-lkas --method cv --viewer web --web-port 8080
+lkas --method cv --viewer web
 
 # Or start simulation alone (requires separate LKAS servers)
-simulation --viewer web --web-port 8080
+simulation --viewer web
+
+# Note: Web port defaults to 8080 from config.yaml
 ```
 
 ### Command Line Options
@@ -95,10 +97,10 @@ simulation --viewer web --web-port 8080
 simulation --help
 
 Options:
-  --host HOST              CARLA server host (default: localhost)
-  --port PORT              CARLA server port (default: 2000)
+  --host HOST              CARLA server host (overrides config, default: from config.yaml)
+  --port PORT              CARLA server port (overrides config, default: from config.yaml)
   --viewer {web,opencv,pygame,none}  Visualization mode (default: web)
-  --web-port PORT          Web viewer port (default: 8080)
+  --web-port PORT          Web viewer port (overrides config, default: from config.yaml)
   --config PATH            Path to config file (default: auto-detected)
   --timeout SECONDS        CARLA connection timeout (default: 10.0)
 ```
@@ -107,8 +109,13 @@ Options:
 
 **Web viewer (recommended, no X11 required)**:
 ```bash
-simulation --viewer web --web-port 8080
-# Open http://localhost:8080 in browser
+# Uses port from config.yaml (default: 8080)
+simulation --viewer web
+
+# Override port from command line
+simulation --viewer web --web-port 8081
+
+# Open http://localhost:8080 in browser (or your custom port)
 ```
 
 **OpenCV window viewer**:
@@ -272,12 +279,13 @@ camera:
 
 ```yaml
 visualization:
-  viewer_type: "web"      # web, opencv, pygame, none
-  web_port: 8080
-  show_fps: true
-  show_metrics: true
-  lane_color: [0, 255, 0]
-  lane_thickness: 3
+  web_port: 8080              # Web viewer port (default: 8080)
+  show_spectator_overlay: true
+  follow_with_spectator: false
+  show_hud: true
+  show_steering: true
+  fill_lane: true
+  enable_alerts: true
 ```
 
 ### Performance Settings

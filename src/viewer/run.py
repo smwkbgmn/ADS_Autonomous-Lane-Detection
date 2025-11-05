@@ -517,22 +517,31 @@ class ZMQWebViewer:
 def main():
     """Main entry point for ZMQ web viewer."""
     import argparse
+    from lkas.detection.core.config import ConfigManager
 
     parser = argparse.ArgumentParser(description="ZMQ Web Viewer - Laptop Side")
+    parser.add_argument('--config', type=str, default=None,
+                       help="Path to configuration file (default: <project-root>/config.yaml)")
     parser.add_argument('--vehicle', type=str, default="tcp://localhost:5557",
                        help="ZMQ URL to receive vehicle data")
     parser.add_argument('--actions', type=str, default="tcp://localhost:5558",
                        help="ZMQ URL to send actions")
-    parser.add_argument('--port', type=int, default=8080,
-                       help="HTTP port for web interface")
+    parser.add_argument('--port', type=int, default=None,
+                       help="HTTP port for web interface (overrides config, default: from config.yaml)")
 
     args = parser.parse_args()
+
+    # Load configuration
+    config = ConfigManager.load(args.config)
+
+    # Determine web port: CLI arg overrides config
+    web_port = args.port if args.port is not None else config.visualization.web_port
 
     # Create and run viewer
     viewer = ZMQWebViewer(
         vehicle_url=args.vehicle,
         action_url=args.actions,
-        web_port=args.port
+        web_port=web_port
     )
 
     viewer.start()

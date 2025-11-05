@@ -34,10 +34,8 @@ class LaneDetection:
         self.method = method
 
         # Create detector using factory
-        print(f"Initializing {method.upper()} detector...")
         factory = DetectorFactory(config)
         self.detector = factory.create(method)
-        print(f"✓ Detector ready: {self.detector.get_name()}")
 
     def process_image(self, image_msg: ImageMessage) -> DetectionMessage:
         """

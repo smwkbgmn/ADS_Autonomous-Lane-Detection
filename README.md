@@ -50,9 +50,9 @@ This installs the package as `ads-skynet` with four command-line entry points:
 ./CarlaUE4.sh
 
 # Terminal 2: Start LKAS (detection + decision integrated)
-lkas --method cv --viewer web --web-port 8080
+lkas --method cv --viewer web
 
-# Open browser: http://localhost:8080
+# Open browser: http://localhost:8080 (port configured in config.yaml)
 ```
 
 ### Modular Mode (Separate Processes)
@@ -70,9 +70,9 @@ lane-detection --method cv
 decision-server
 
 # Terminal 4: Start simulation orchestrator
-simulation --viewer web --web-port 8080
+simulation --viewer web
 
-# Open browser: http://localhost:8080
+# Open browser: http://localhost:8080 (port configured in config.yaml)
 ```
 
 **Benefits:**
@@ -215,7 +215,7 @@ ads_skynet/
 
 ```bash
 # Integrated mode (easiest)
-lkas --method cv --viewer web --web-port 8080
+lkas --method cv --viewer web
 
 # Or modular mode (separate processes)
 # Terminal 1: Detection server
@@ -225,7 +225,7 @@ lane-detection --method cv
 decision-server
 
 # Terminal 3: Simulation
-simulation --viewer web --web-port 8080
+simulation --viewer web
 ```
 
 ### Remote CARLA Server
@@ -235,8 +235,7 @@ simulation --viewer web --web-port 8080
 simulation \
   --host <CARLA_HOST> \
   --port 2000 \
-  --viewer web \
-  --web-port 8080
+  --viewer web
 ```
 
 ### Deep Learning Detection
@@ -255,7 +254,10 @@ simulation --viewer web
 
 ```bash
 # Web viewer (works in Docker, no X11 needed)
-lkas --viewer web --web-port 8080
+lkas --viewer web
+
+# Override web port (default from config.yaml: 8080)
+lkas --viewer web --web-port 8081
 
 # OpenCV window (requires X11)
 lkas --viewer opencv
@@ -456,13 +458,16 @@ After `pip install -e .`, you get two entry points:
 ### Command Templates
 
 ```bash
-# Integrated mode (simplest)
-lkas --method cv --viewer web --web-port 8080
+# Integrated mode (simplest, uses config.yaml for ports)
+lkas --method cv --viewer web
 
 # Modular mode (separate processes)
 lane-detection --method cv
 decision-server
-simulation --viewer web --web-port 8080
+simulation --viewer web
+
+# Override web port from command line
+simulation --viewer web --web-port 8081
 
 # Remote CARLA + custom config
 simulation \

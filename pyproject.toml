@@ -87,7 +87,7 @@ all = ["seame-ads[dev,train]"]
 # Entry points for command-line scripts
 [project.scripts]
 lkas = "lkas.run:main"
-lane-detection = "lkas.detection.run:main"
+detection-server = "lkas.detection.run:main"
 decision-server = "lkas.decision.run:main"
 simulation = "simulation.run:main"
 viewer = "viewer.run:main"

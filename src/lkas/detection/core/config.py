@@ -112,6 +112,9 @@ class VisualizationConfig:
     follow_with_spectator: bool = False
     alert_blink_frequency: int = 10
 
+    # Web viewer port
+    web_port: int = 8080
+
     # Colors (BGR format for OpenCV)
     color_left_lane: Tuple[int, int, int] = (255, 0, 0)  # Blue
     color_right_lane: Tuple[int, int, int] = (0, 0, 255)  # Red

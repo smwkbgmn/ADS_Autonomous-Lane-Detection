@@ -48,13 +48,16 @@ The following files are still relevant:
 For the current way to run the system, see the main README:
 
 ```bash
-# Integrated mode (simplest)
-lkas --method cv --viewer web --web-port 8080
+# Integrated mode (simplest, uses port from config.yaml)
+lkas --method cv --viewer web
 
 # Or modular mode (separate processes)
 lane-detection --method cv
 decision-server
-simulation --viewer web --web-port 8080
+simulation --viewer web
+
+# Web port defaults to 8080 from config.yaml
+# Override with: --web-port 8081
 ```
 
 ## Project Structure (Current)

@@ -30,14 +30,17 @@ The viewer module runs on your **laptop** (not the vehicle!) and:
 The web viewer is built into the simulation module. Simply use:
 
 ```bash
-# Start LKAS with web viewer
-lkas --method cv --viewer web --web-port 8080
+# Start LKAS with web viewer (uses port from config.yaml)
+lkas --method cv --viewer web
 
 # Or start simulation alone with web viewer
-simulation --viewer web --web-port 8080
+simulation --viewer web
+
+# Override port from command line if needed
+simulation --viewer web --web-port 8081
 
 # Open browser
-# http://localhost:8080
+# http://localhost:8080 (or your custom port)
 ```
 
 ### Standalone Viewer (Future)
@@ -51,8 +54,11 @@ For remote monitoring scenarios, a standalone viewer can be developed to connect
 The viewer is integrated into the simulation module:
 
 ```bash
-# Web viewer (default)
-simulation --viewer web --web-port 8080
+# Web viewer (uses port from config.yaml, default: 8080)
+simulation --viewer web
+
+# Override web port from command line
+simulation --viewer web --web-port 8081
 
 # OpenCV window viewer
 simulation --viewer opencv
@@ -155,7 +161,8 @@ simulation --viewer none
 **Solutions:**
 - Check if simulation is running: `ps aux | grep simulation`
 - Verify web port is accessible: `curl http://localhost:8080`
-- Try different port: `simulation --web-port 8081`
+- Try different port (CLI override): `simulation --web-port 8081`
+- Or change port in config.yaml: `visualization.web_port: 8081`
 - Check browser console for errors (F12)
 
 ### Problem: No video stream
