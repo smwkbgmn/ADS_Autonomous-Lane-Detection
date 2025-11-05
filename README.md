@@ -6,9 +6,9 @@ A modular, production-ready lane keeping system for CARLA simulator with clean s
 
 - **Clean 3-Module Architecture**: Simulation, Detection, Decision
 - **Dual Detection Methods**: Computer Vision (OpenCV) and Deep Learning (PyTorch CNN)
-- **Distributed System**: Run detection on remote GPU servers
+- **Distributed System**: Run detection as separate process
 - **Multiple Visualization Options**: OpenCV, Pygame, and Web viewer (no X11 needed!)
-- **Production Ready**: Process isolation, ZMQ communication, fault tolerance
+- **Production Ready**: Process isolation, shared memory communication, fault tolerance
 - **Modern Python Package**: `pyproject.toml`, editable install, entry point scripts
 
 ## 📦 Installation
@@ -35,148 +35,134 @@ pip install -e ".[dev]"
 pip install -e ".[all]"
 ```
 
-This installs the package as `seame-ads` with three command-line entry points:
+This installs the package as `ads-skynet` with four command-line entry points:
 - `simulation` - Main CARLA simulation
 - `lane-detection` - Standalone detection server
-- `viewer` - Remote web viewer (NEW: production mode)
+- `decision-server` - Decision/control server
+- `viewer` - Remote web viewer
 
 ## 🚀 Quick Start
 
-### Option 1: Development Mode (Classic)
+### Integrated Mode (All-in-one)
 
 ```bash
 # Terminal 1: Start CARLA server
 ./CarlaUE4.sh
 
-# Terminal 2: Start detection server (using installed entry point)
-lane-detection --method cv --port 5556
-
-# Terminal 3: Start CARLA simulation with web viewer
-simulation --detector-url tcp://localhost:5556 --viewer web --web-port 8080
+# Terminal 2: Start LKAS (detection + decision integrated)
+lkas --method cv --viewer web --web-port 8080
 
 # Open browser: http://localhost:8080
 ```
 
-### Option 2: Production Mode (NEW! Recommended)
+### Modular Mode (Separate Processes)
 
-**Better for real vehicles - separates rendering to laptop:**
+**Better for distributed systems and resource allocation:**
 
 ```bash
 # Terminal 1: Start CARLA server
 ./CarlaUE4.sh
 
 # Terminal 2: Start detection server
-lane-detection --method cv --port 5556
+lane-detection --method cv
 
-# Terminal 3: Start simulation with ZMQ broadcasting
-simulation \
-    --detector-url tcp://localhost:5556 \
-    --viewer none \
-    --broadcast detection-only
+# Terminal 3: Start decision server
+decision-server
 
-# Terminal 4: Start remote viewer (on laptop)
-viewer --vehicle tcp://localhost:5557 --port 8080
+# Terminal 4: Start simulation orchestrator
+simulation --viewer web --web-port 8080
 
 # Open browser: http://localhost:8080
 ```
 
-**Broadcast Modes:**
-- `--broadcast none` - No broadcasting (default)
-- `--broadcast detection-only` - Production mode (~9 KB/s, recommended for vehicles)
-- `--broadcast with-images` - Development mode (~1.5 MB/s, includes raw images)
-
 **Benefits:**
-- ✅ Vehicle/sim CPU stays lightweight (no rendering!)
-- ✅ Rich overlays drawn on laptop
-- ✅ Remote monitoring capable
-- ✅ Multiple viewers can connect
+- ✅ Separate processes for detection and decision
+- ✅ Shared memory for low-latency communication
+- ✅ Independent lifecycle management
+- ✅ Easy to distribute across machines
 
-**Alternative (without entry points):**
+**Alternative (using Python modules directly):**
 ```bash
 # Terminal 2
-python -m detection.detection --method cv --port 5556
+python -m lkas.detection.run --method cv
 
 # Terminal 3
-python -m simulation.simulation --detector-url tcp://localhost:5556 --viewer web
+python -m lkas.decision.run
+
+# Terminal 4
+python -m simulation.run --viewer web
 ```
 
 ## 📁 Project Structure
 
 ```
-seame-ads/
+ads_skynet/
 ├── pyproject.toml           # 📦 Package configuration & dependencies
 ├── config.yaml              # ⚙️ System configuration (auto-loaded from project root)
 │
-├── simulation/              ⭐ CARLA simulation & orchestration
-│   ├── simulation.py        # Main entry point (installed as 'simulation' command)
-│   ├── __init__.py          # Package exports
+├── src/
 │   │
-│   ├── connection.py        # CARLA connection
-│   ├── vehicle.py           # Vehicle control
-│   ├── sensors.py           # Camera sensors
+│   ├── lkas/                ⭐ Lane Keeping Assist System
+│   │   ├── run.py           # Integrated LKAS entry point
+│   │   ├── system.py        # LKAS orchestrator
+│   │   │
+│   │   ├── detection/       # Lane detection module
+│   │   │   ├── run.py       # Detection server entry point
+│   │   │   ├── server.py    # DetectionServer with shared memory
+│   │   │   ├── client.py    # DetectionClient for IPC
+│   │   │   ├── detector.py  # Core LaneDetection wrapper
+│   │   │   │
+│   │   │   ├── core/        # Core abstractions
+│   │   │   │   ├── config.py     # Configuration management
+│   │   │   │   ├── factory.py    # Factory pattern
+│   │   │   │   ├── interfaces.py # Abstract base classes
+│   │   │   │   └── models.py     # Data models (Lane, DetectionResult)
+│   │   │   │
+│   │   │   ├── integration/ # IPC infrastructure
+│   │   │   │   ├── messages.py              # Message definitions
+│   │   │   │   ├── shared_memory_detection.py  # Image/detection channels
+│   │   │   │   └── shared_memory_control.py    # Control channel
+│   │   │   │
+│   │   │   └── method/      # Detection implementations
+│   │   │       ├── computer_vision/  # OpenCV-based
+│   │   │       │   └── cv_lane_detector.py
+│   │   │       └── deep_learning/    # CNN-based
+│   │   │           ├── lane_net.py
+│   │   │           └── lane_net_base.py
+│   │   │
+│   │   └── decision/        # Control decision module
+│   │       ├── run.py       # Decision server entry point
+│   │       ├── server.py    # DecisionServer
+│   │       ├── client.py    # DecisionClient
+│   │       ├── analyzer.py  # Lane position analysis
+│   │       └── controller.py # PD control logic
 │   │
-│   ├── integration/         # System orchestration
-│   │   ├── distributed_orchestrator.py  # Multi-process orchestrator
-│   │   ├── communication.py           # ZMQ communication (req-rep)
-│   │   ├── zmq_broadcast.py          # NEW: ZMQ broadcasting (pub-sub)
-│   │   ├── shared_memory.py          # NEW: Shared memory (ultra-low latency)
-│   │   ├── messages.py                # Message protocols
-│   │   └── visualization.py           # Visualization manager
+│   ├── simulation/          ⭐ CARLA simulation & orchestration
+│   │   ├── run.py           # Main simulation entry point
+│   │   ├── orchestrator.py  # System orchestrator
+│   │   │
+│   │   ├── carla_api/       # CARLA interface
+│   │   │   ├── connection.py # CARLA connection
+│   │   │   ├── vehicle.py    # Vehicle control
+│   │   │   └── sensors.py    # Camera sensors
+│   │   │
+│   │   ├── integration/     # LKAS integration
+│   │   │   └── __init__.py  # Detection/Decision clients
+│   │   │
+│   │   ├── processing/      # Frame processing
+│   │   │   ├── frame_processor.py  # Processing pipeline
+│   │   │   └── metrics_logger.py   # Performance metrics
+│   │   │
+│   │   └── utils/           # Utilities
+│   │       └── visualizer.py # Visualization helpers
 │   │
-│   ├── processing/          # Frame processing
-│   │   ├── frame_processor.py  # Processing pipeline
-│   │   ├── pd_controller.py    # PD controller
-│   │   └── metrics_logger.py   # Performance metrics
-│   │
-│   ├── ui/                  # User interface
-│   │   ├── web_viewer.py    # Web-based viewer (no X11!)
-│   │   ├── pygame_viewer.py  # Pygame viewer
-│   │   ├── keyboard_handler.py  # Keyboard controls
-│   │   └── video_recorder.py    # Video recording
-│   │
-│   └── utils/               # Utilities
-│       ├── lane_analyzer.py     # Lane analysis
-│       ├── visualizer.py        # Visualization helpers
-│       └── spectator_overlay.py  # CARLA spectator overlay
+│   └── viewer/              ⭐ Remote web viewer
+│       ├── run.py           # Web viewer entry point
+│       ├── __init__.py      # Package exports
+│       └── README.md        # Viewer documentation
 │
-├── detection/               ⭐ Pure lane detection
-│   ├── detection.py         # Standalone server (installed as 'lane-detection' command)
-│   ├── __init__.py          # Package exports
-│   │
-│   ├── core/                # Core abstractions
-│   │   ├── interfaces.py    # Abstract base classes
-│   │   ├── models.py        # Data models (Lane, Metrics)
-│   │   ├── config.py        # Configuration management
-│   │   └── factory.py       # Factory pattern
-│   │
-│   ├── detection_module/    # Detection wrapper
-│   │   └── detector.py      # Detection module
-│   │
-│   ├── method/              # Detection implementations
-│   │   ├── computer_vision/      # OpenCV-based
-│   │   │   └── cv_lane_detector.py
-│   │   └── deep_learning/        # CNN-based
-│   │       ├── lane_net.py
-│   │       └── lane_net_base.py
-│   │
-│   └── tests/               # Test suite
-│       ├── test_connection.py
-│       └── test_setup.py
-│
-├── decision/                ⭐ Control decisions
-│   ├── analyzer.py          # Lane position analysis
-│   └── controller.py        # PD control logic
-│
-├── viewer/                  ⭐ NEW: Remote web viewer
-│   ├── run.py               # ZMQ-based viewer (installed as 'viewer' command)
-│   ├── __init__.py          # Package exports
-│   └── README.md            # Viewer documentation
-│
-└── .docs/                   # Documentation
-    ├── START_HERE.md
-    ├── QUICK_START.md
-    ├── ARCHITECTURE_DECISION.md
-    └── ...
+└── docs/                    # Documentation
+    └── README.md            # Documentation index
 ```
 
 ## 🎯 Architecture
@@ -188,18 +174,18 @@ seame-ads/
 │                    simulation/                               │
 │              (CARLA Orchestration Layer)                     │
 │  • Runs CARLA simulation                                     │
-│  • Coordinates modules                                       │
-│  • Provides entry points                                     │
+│  • Coordinates LKAS modules via shared memory                │
+│  • Provides visualization                                    │
 └──────────────────────────────────────────────────────────────┘
          │                    │                    │
          ▼                    ▼                    ▼
 ┌────────────────┐  ┌───────────────────┐  ┌──────────────────┐
-│  simulation/   │  │   detection/      │  │    decision/     │
-│  (CARLA API)   │  │(Lane Detection)   │  │ (Control Logic)  │
+│  lkas/         │  │   lkas/           │  │    simulation/   │
+│  detection/    │  │   decision/       │  │    carla_api/    │
 │                │  │                   │  │                  │
-│ • Connection   │  │ • CV Detection    │  │ • Lane Analysis  │
-│ • Vehicle      │  │ • DL Detection    │  │ • PD Controller  │
-│ • Sensors      │  │ • Pure algorithms │  │ • Steering       │
+│ • CV Detection │  │ • Lane Analysis   │  │ • Connection     │
+│ • DL Detection │  │ • PD Controller   │  │ • Vehicle        │
+│ • Shared Mem   │  │ • Steering Calc   │  │ • Sensors        │
 └────────────────┘  └───────────────────┘  └──────────────────┘
 ```
 
@@ -208,45 +194,45 @@ seame-ads/
 **`simulation/`** - CARLA Integration & Orchestration
 - Connects to CARLA simulator
 - Manages vehicles and sensors
-- Orchestrates data flow between modules
-- **Contains:** main entry points, orchestrators, UI
+- Orchestrates LKAS modules via shared memory
+- **Contains:** CARLA API wrappers, orchestrator, visualization
 
-**`detection/`** - Pure Lane Detection
+**`lkas/detection/`** - Pure Lane Detection
 - Detects lanes from images (CV or DL)
+- Runs as separate process with shared memory IPC
 - No CARLA dependencies
-- Can run as standalone service
-- **Contains:** detection algorithms, detection server
+- **Contains:** detection algorithms, server/client, shared memory channels
 
-**`decision/`** - Control Decisions
-- Analyzes lane position
-- Generates steering commands
-- PD control logic
-- **Contains:** analyzer, controller
+**`lkas/decision/`** - Control Decisions
+- Analyzes lane position from detection results
+- Generates steering commands via PD controller
+- Runs as separate process with shared memory IPC
+- **Contains:** analyzer, controller, server/client
 
 ## 🎮 Usage
 
 ### Basic Usage (Local)
 
 ```bash
-# Terminal 1: Start detection server
-lane-detection --method cv --port 5556
+# Integrated mode (easiest)
+lkas --method cv --viewer web --web-port 8080
 
-# Terminal 2: Start CARLA simulation with web viewer
-simulation \
-  --detector-url tcp://localhost:5556 \
-  --viewer web \
-  --web-port 8080
+# Or modular mode (separate processes)
+# Terminal 1: Detection server
+lane-detection --method cv
+
+# Terminal 2: Decision server
+decision-server
+
+# Terminal 3: Simulation
+simulation --viewer web --web-port 8080
 ```
 
 ### Remote CARLA Server
 
 ```bash
-# Terminal 1: Detection server (on GPU machine)
-lane-detection --method cv --port 5556
-
-# Terminal 2: CARLA simulation (on CARLA machine)
+# Simulation connects to remote CARLA
 simulation \
-  --detector-url tcp://gpu-server-ip:5556 \
   --host <CARLA_HOST> \
   --port 2000 \
   --viewer web \
@@ -256,30 +242,29 @@ simulation \
 ### Deep Learning Detection
 
 ```bash
-# Terminal 1: DL detection server (requires GPU)
-lane-detection --method dl --port 5556 --gpu 0
+# Integrated mode with DL
+lkas --method dl --viewer web
 
-# Terminal 2: CARLA simulation
-simulation --detector-url tcp://localhost:5556 --viewer web
+# Or modular mode with DL
+lane-detection --method dl
+decision-server
+simulation --viewer web
 ```
 
 ### Viewer Options
 
 ```bash
-# Auto-detect best viewer (default)
-simulation --detector-url tcp://localhost:5556 --viewer auto
-
 # Web viewer (works in Docker, no X11 needed)
-simulation --detector-url tcp://localhost:5556 --viewer web --web-port 8080
+lkas --viewer web --web-port 8080
 
 # OpenCV window (requires X11)
-simulation --detector-url tcp://localhost:5556 --viewer opencv
+lkas --viewer opencv
 
 # Pygame window
-simulation --detector-url tcp://localhost:5556 --viewer pygame
+lkas --viewer pygame
 
 # No visualization (headless)
-simulation --detector-url tcp://localhost:5556 --no-display
+lkas --no-display
 ```
 
 ## 🔧 Configuration
@@ -439,12 +424,10 @@ See [.docs/DEVCONTAINER_SETUP.md](.docs/DEVCONTAINER_SETUP.md) for details.
 
 | Document | Description |
 |----------|-------------|
-| [.docs/START_HERE.md](.docs/START_HERE.md) | 👈 Start here! |
-| [simulation/README.md](simulation/README.md) | Simulation module guide |
-| [.docs/ARCHITECTURE_DECISION.md](.docs/ARCHITECTURE_DECISION.md) | Architecture rationale |
-| [.docs/DEVCONTAINER_SETUP.md](.docs/DEVCONTAINER_SETUP.md) | Dev container setup |
-| [.docs/VISUALIZATION_GUIDE.md](.docs/VISUALIZATION_GUIDE.md) | Visualization options |
-| [.docs/DISTRIBUTED_ARCHITECTURE.md](.docs/DISTRIBUTED_ARCHITECTURE.md) | Distributed system design |
+| [docs/README.md](docs/README.md) | Documentation index |
+| [src/lkas/detection/README.md](src/lkas/detection/README.md) | Detection module guide |
+| [src/simulation/README.md](src/simulation/README.md) | Simulation module guide |
+| [src/viewer/README.md](src/viewer/README.md) | Viewer module guide |
 
 ## 🎓 For Students
 
@@ -464,33 +447,29 @@ After `pip install -e .`, you get two entry points:
 
 | Command | Purpose | Equivalent Python Module |
 |---------|---------|--------------------------|
-| `simulation` | Main CARLA simulation | `python -m simulation.simulation` |
-| `lane-detection` | Detection server | `python -m detection.detection` |
+| `lkas` | Integrated LKAS | `python -m lkas.run` |
+| `simulation` | CARLA simulation | `python -m simulation.run` |
+| `lane-detection` | Detection server | `python -m lkas.detection.run` |
+| `decision-server` | Decision server | `python -m lkas.decision.run` |
+| `viewer` | Web viewer | `python -m viewer.run` |
 
 ### Command Templates
 
 ```bash
-# Start detection server (Terminal 1)
-lane-detection --method cv --port 5556
+# Integrated mode (simplest)
+lkas --method cv --viewer web --web-port 8080
 
-# Start CARLA simulation (Terminal 2)
-simulation \
-  --detector-url tcp://localhost:5556 \
-  --viewer web \
-  --web-port 8080
-
-# OpenCV viewer instead of web
-simulation --detector-url tcp://localhost:5556 --viewer opencv
-
-# Pygame viewer
-simulation --detector-url tcp://localhost:5556 --viewer pygame
+# Modular mode (separate processes)
+lane-detection --method cv
+decision-server
+simulation --viewer web --web-port 8080
 
 # Remote CARLA + custom config
 simulation \
   --host <REMOTE_IP> \
   --port 2000 \
-  --detector-url tcp://localhost:5556 \
-  --config /path/to/config.yaml
+  --config /path/to/config.yaml \
+  --viewer web
 ```
 
 ### Package Structure
@@ -498,26 +477,28 @@ simulation \
 After installation, import modules directly:
 
 ```python
-# Import detection
-from detection.core.config import ConfigManager
-from detection.core.models import Lane, DetectionResult
-from detection import LaneDetection
+# Import LKAS detection
+from lkas.detection.core.config import ConfigManager
+from lkas.detection.core.models import Lane, DetectionResult
+from lkas.detection import LaneDetection, DetectionClient
+
+# Import LKAS decision
+from lkas.decision import DecisionServer, DecisionClient
 
 # Import simulation
-from simulation import CARLAConnection, VehicleManager
-from simulation.integration.communication import DetectionClient
-
-# Import decision
-from decision import DecisionController, LaneAnalyzer
+from simulation import SimulationOrchestrator
+from simulation.integration import DetectionClient, DecisionClient
 ```
 
 ## ✅ Why This Structure?
 
-1. **`simulation/` contains orchestration** - Everything related to running CARLA simulations
-2. **`detection/` is pure algorithms** - Can be used in any project, no CARLA dependency
-3. **`decision/` is reusable logic** - Works with any detection system
-4. **Clear responsibilities** - Each module has ONE job
-5. **Easy to test** - Pure functions, no entangled dependencies
+1. **`lkas/` is self-contained** - Complete lane keeping system, reusable in any project
+2. **`lkas/detection/` is pure algorithms** - No CARLA dependency, works anywhere
+3. **`lkas/decision/` is reusable logic** - Works with any detection system
+4. **`simulation/` orchestrates** - CARLA-specific integration and coordination
+5. **Shared memory IPC** - Low-latency inter-process communication
+6. **Clear responsibilities** - Each module has ONE job
+7. **Easy to test** - Pure functions, no entangled dependencies
 
 ## 🎁 Modern Python Package Benefits
 
@@ -569,7 +550,7 @@ This project uses modern Python packaging (`pyproject.toml`) instead of legacy `
 
 ### 📦 Package Info
 
-- **Name**: `seame-ads`
+- **Name**: `ads-skynet`
 - **Version**: 0.1.0
 - **Python**: 3.10+
 - **License**: See LICENSE file

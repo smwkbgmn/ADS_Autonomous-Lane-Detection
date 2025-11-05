@@ -16,7 +16,7 @@ Many files in this directory contain **outdated information** from previous arch
 2. **Phase 2:** Modular architecture (single-process)
 3. **Phase 3:** Distributed architecture (current)
 
-**Current Status (October 2025):** The project exclusively uses **distributed architecture** with separate processes for detection and simulation.
+**Current Status (November 2025):** The project uses **shared memory-based architecture** with separate processes for detection, decision, and simulation communicating via shared memory for low-latency IPC.
 
 ### Deprecated Files
 
@@ -48,27 +48,26 @@ The following files are still relevant:
 For the current way to run the system, see the main README:
 
 ```bash
-# Terminal 1: Start detection server
-cd detection
-python detection_server.py --method cv --port 5555
+# Integrated mode (simplest)
+lkas --method cv --viewer web --web-port 8080
 
-# Terminal 2: Start CARLA simulation
-cd simulation
-python main_distributed_v2.py \
-  --detector-url tcp://localhost:5555 \
-  --viewer web \
-  --web-port 8080
+# Or modular mode (separate processes)
+lane-detection --method cv
+decision-server
+simulation --viewer web --web-port 8080
 ```
 
 ## Project Structure (Current)
 
 ```
-ads_ld/
-├── simulation/           # CARLA orchestration
-│   └── main_distributed_v2.py  # Only entry point
-├── detection/            # Lane detection
-│   └── detection_server.py     # Detection server
-└── decision/             # Control logic
+ads_skynet/
+├── src/
+│   ├── lkas/                # Lane Keeping Assist System
+│   │   ├── detection/       # Lane detection module
+│   │   └── decision/        # Control decision module
+│   ├── simulation/          # CARLA orchestration
+│   └── viewer/              # Remote web viewer
+└── config.yaml
 ```
 
 ## For New Contributors
@@ -80,5 +79,5 @@ ads_ld/
 
 ---
 
-**Last Updated:** October 27, 2025
-**Current Architecture:** Distributed (ZMQ-based multi-process)
+**Last Updated:** November 5, 2025
+**Current Architecture:** Modular (Shared memory-based multi-process)

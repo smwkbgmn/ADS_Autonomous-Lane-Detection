@@ -25,14 +25,19 @@ detection/
 │   ├── interfaces.py     # Abstract base classes (LaneDetector, etc.)
 │   └── models.py         # Data models (Lane, DetectionResult, etc.)
 │
+├── integration/          # Inter-process communication infrastructure
+│   ├── messages.py       # Message definitions for IPC
+│   ├── shared_memory_detection.py  # Image/detection shared memory channels
+│   └── shared_memory_control.py    # Control command shared memory channel
+│
 ├── method/               # Detection algorithm implementations
 │   ├── computer_vision/  # Traditional CV approach (Canny + Hough)
 │   └── deep_learning/    # Neural network approach (PyTorch)
 │
-├── detection_module/     # High-level detection wrapper
-│   └── detector.py       # LaneDetectionModule class
-│
-└── detection.py          # Standalone detection server (ZMQ-based)
+├── client.py             # DetectionClient for reading detections
+├── detector.py           # LaneDetection core wrapper class
+├── server.py             # DetectionServer with shared memory I/O
+└── run.py                # CLI entrypoint (lane-detection command)
 ```
 
 ## Core Components
@@ -192,35 +197,55 @@ Run detection as a separate service (useful for distributed systems):
 
 ```bash
 # Start CV detector server
-python detection/detection.py --method cv --port 5556
+lane-detection --method cv
 
-# Start DL detector server with GPU
-python detection/detection.py --method dl --port 5556 --gpu 0
+# Start DL detector server
+lane-detection --method dl
+
+# Or use the module directly
+python -m lkas.detection.run --method cv
 ```
 
 Server features:
-- ZMQ-based communication
-- Can run on different machine
-- Multiple clients supported
-- Independent lifecycle from main application
+- **Shared memory-based communication** for high performance
+- Independent process lifecycle
+- Bidirectional communication (control commands + detection results)
+- Low latency compared to network-based IPC
 
-### Integration with Lane Detection Module
+### Detection Client Integration
 
 ```python
-from lkas.detection.detection_module.detector import LaneDetectionModule
-from simulation.integration.messages import ImageMessage
+from lkas.detection import DetectionClient
+from lkas.detection.core.config import ConfigManager
 
-# Initialize module
-module = LaneDetectionModule(config, method='cv')
+# Initialize client
+config = ConfigManager.load('config.yaml')
+client = DetectionClient(config)
 
-# Process image message
-image_msg = ImageMessage(
-    image=image_array,
-    frame_id=123,
-    timestamp=time.time()
-)
+# Write image for detection
+client.write_image(image_array, frame_id=123)
 
-detection_msg = module.process_image(image_msg)
+# Read detection result
+detection_msg = client.read_detection()
+if detection_msg:
+    print(f"Left lane: {detection_msg.left_lane}")
+    print(f"Right lane: {detection_msg.right_lane}")
+```
+
+### Direct Detection Usage
+
+```python
+from lkas.detection import LaneDetection
+from lkas.detection.core.config import ConfigManager
+
+# Initialize detector
+config = ConfigManager.load('config.yaml')
+detector = LaneDetection(config, method='cv')
+
+# Process image directly
+result = detector.detect(image_array)
+if result.has_both_lanes:
+    print(f"Processing time: {result.processing_time_ms:.2f} ms")
 ```
 
 ## Configuration Example
@@ -299,7 +324,7 @@ def create(self, detector_type: str | None = None) -> LaneDetector:
 
 - **Core**: numpy, opencv-python, PyYAML
 - **Deep Learning**: torch, torchvision (optional)
-- **Communication**: pyzmq (for distributed mode)
+- **Communication**: multiprocessing.shared_memory (Python 3.8+)
 
 ## Related Modules
 

@@ -25,201 +25,205 @@ The viewer module runs on your **laptop** (not the vehicle!) and:
 
 ## Quick Start
 
-### 1. Start vehicle/simulation (with broadcasting)
+### Integrated with Simulation
+
+The web viewer is built into the simulation module. Simply use:
 
 ```bash
-python simulation/run.py \
-    --viewer none \
-    --zmq-broadcast \
-    --detector-url tcp://localhost:5556
+# Start LKAS with web viewer
+lkas --method cv --viewer web --web-port 8080
+
+# Or start simulation alone with web viewer
+simulation --viewer web --web-port 8080
+
+# Open browser
+# http://localhost:8080
 ```
 
-### 2. Start viewer (on laptop)
+### Standalone Viewer (Future)
 
-```bash
-# Using entry point (after pip install -e .)
-zmq-viewer --vehicle tcp://vehicle-ip:5557 --port 8080
-
-# Or directly
-python viewer/zmq_web_viewer.py \
-    --vehicle tcp://localhost:5557 \
-    --port 8080
-```
-
-### 3. Open browser
-
-```
-http://localhost:8080
-```
+For remote monitoring scenarios, a standalone viewer can be developed to connect via network.
 
 ## Usage
 
-### Command-line Options
+### Integrated Mode
+
+The viewer is integrated into the simulation module:
 
 ```bash
-zmq-viewer \
-    --vehicle tcp://192.168.1.100:5557 \  # Vehicle data URL
-    --actions tcp://192.168.1.100:5558 \  # Actions URL
-    --port 8080                            # HTTP port
+# Web viewer (default)
+simulation --viewer web --web-port 8080
+
+# OpenCV window viewer
+simulation --viewer opencv
+
+# Pygame viewer
+simulation --viewer pygame
+
+# No visualization (headless)
+simulation --viewer none
 ```
 
-### Network Setup
+### Web Viewer Features
 
-**Same machine (development):**
-```bash
-zmq-viewer --vehicle tcp://localhost:5557
-```
-
-**Remote vehicle (production):**
-```bash
-# Find vehicle IP
-# On vehicle: hostname -I
-
-# Connect from laptop
-zmq-viewer --vehicle tcp://192.168.1.100:5557
-```
+- **Real-time video streaming** from CARLA camera
+- **Lane overlay visualization** (left/right lanes)
+- **HUD display** with metrics:
+  - Speed, steering angle
+  - Lane offset, heading angle
+  - Detection FPS, latency
+- **Interactive controls**:
+  - Respawn vehicle
+  - Toggle autopilot
+  - Adjust view settings
 
 ## Architecture
 
 ```
-┌─ VEHICLE ─────────────────────┐
-│                               │
-│  Camera → Detection           │
-│           ↓                   │
-│  Control Decision             │
-│           ↓                   │
-│  ZMQ Broadcaster ─────────────┼──┐
-│  :5557 (frames, detections)   │  │
-│  :5558 (receive actions)      │  │
-└───────────────────────────────┘  │
-                                   │ Network
-┌─ LAPTOP ──────────────────────┐  │
-│                               │  │
-│  ZMQ Subscriber ◄─────────────┼──┘
-│           ↓                   │
-│  Draw Overlays (HEAVY!)       │
-│           ↓                   │
-│  HTTP Server → Browser        │
-│           ↑                   │
-│  Actions (respawn, pause)     │
-│                               │
-└───────────────────────────────┘
+┌─ SIMULATION PROCESS ──────────────────────────────────────┐
+│                                                            │
+│  ┌──────────┐      ┌──────────────┐      ┌────────────┐  │
+│  │  CARLA   │ ───▶ │  Detection   │ ───▶ │  Decision  │  │
+│  │  Camera  │      │  (Shared Mem)│      │ (Shared Mem│  │
+│  └──────────┘      └──────────────┘      └────────────┘  │
+│       │                    │                     │        │
+│       │ Image              │ Lanes               │ Steer  │
+│       ▼                    ▼                     ▼        │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │           Frame Processor & Visualizer              │  │
+│  │  • Draws lane overlays                              │  │
+│  │  • Renders HUD with metrics                         │  │
+│  │  • Generates JPEG stream                            │  │
+│  └─────────────────────────────────────────────────────┘  │
+│                              │                            │
+│                              ▼                            │
+│  ┌─────────────────────────────────────────────────────┐  │
+│  │           Web Server (Flask/HTTP)                   │  │
+│  │  • Serves HTML interface                            │  │
+│  │  • Streams MJPEG video                              │  │
+│  │  • Handles user interactions                        │  │
+│  └─────────────────────────────────────────────────────┘  │
+│                              │                            │
+└──────────────────────────────┼────────────────────────────┘
+                               │ HTTP
+                               ▼
+                      ┌────────────────┐
+                      │    Browser     │
+                      │  localhost:8080│
+                      └────────────────┘
 ```
 
 ## Features
 
-### Data Reception
-- **Frames**: Raw RGB images from vehicle camera
-- **Detections**: Lane detection results (left/right lanes)
-- **State**: Vehicle telemetry (steering, speed, throttle, brake)
+### Visualization Elements
 
-### Visualization
-- **Lane overlays**: Left/right lane lines with confidence
-- **HUD**: Speed, steering, metrics
-- **Performance**: Detection latency, FPS
-- **Status**: Vehicle state, alerts
+**Lane Overlays:**
+- Left lane line (green/red based on detection)
+- Right lane line (green/red based on detection)
+- Lane confidence indicators
+- Region of interest (ROI) visualization
 
-### Actions
-- **Respawn**: Reset vehicle position
-- **Pause**: Freeze simulation
-- **Resume**: Continue simulation
+**HUD Display:**
+- Vehicle speed (km/h)
+- Steering angle (degrees)
+- Lateral offset from center
+- Heading angle deviation
+- Lane departure status
+- Detection FPS and latency
+- Frame processing time
+
+**Interactive Controls:**
+- Keyboard shortcuts for vehicle control
+- Respawn vehicle button
+- Toggle autopilot mode
+- Adjust visualization settings
 
 ## Performance
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Latency | ~5-10ms | Network + rendering |
-| FPS | 30 FPS | Matches vehicle broadcast rate |
-| CPU (vehicle) | **0%** | No rendering on vehicle! |
-| CPU (laptop) | ~20% | Drawing overlays |
-| Network | ~500 KB/s | JPEG compressed frames |
+| FPS | 25-30 FPS | Real-time streaming |
+| Latency | ~33ms | Frame capture to display |
+| CPU (simulation) | ~15-20% | Rendering + encoding |
+| Memory | ~50MB | Frame buffers |
+| Network | ~200-500 KB/s | MJPEG stream to browser |
 
 ## Troubleshooting
 
-### Problem: No frames received
+### Problem: Blank page in browser
 
-**Check:** Is broadcasting enabled on vehicle?
-```bash
-# Vehicle should show:
-✓ ZMQ broadcaster started on tcp://*:5557
-```
+**Solutions:**
+- Check if simulation is running: `ps aux | grep simulation`
+- Verify web port is accessible: `curl http://localhost:8080`
+- Try different port: `simulation --web-port 8081`
+- Check browser console for errors (F12)
 
-**Fix:** Add `--zmq-broadcast` flag to simulation
+### Problem: No video stream
 
-### Problem: Connection refused
+**Solutions:**
+- Ensure CARLA camera is active
+- Check simulation terminal for errors
+- Verify detection/decision modules are running
+- Restart simulation
 
-**Check:** Firewall or wrong IP
-```bash
-# Test connection
-telnet vehicle-ip 5557
-```
+### Problem: Slow/laggy video
 
-**Fix:** Use correct IP address, check firewall
+**Solutions:**
+- Reduce camera resolution in config.yaml
+- Close other resource-intensive applications
+- Check CARLA server performance
+- Use headless mode if visualization not needed
 
-### Problem: Black screen in browser
+### Problem: Controls not working
 
-**Check:** Is vehicle sending frames?
-```bash
-# Viewer terminal should show:
-[Subscriber] Receiving 30.0 FPS | Frame 123
-```
-
-**Fix:** Check if simulation is running and camera is active
-
-### Problem: Actions don't work
-
-**Check:** Is action subscriber registered?
-```bash
-# Vehicle should show:
-✓ ZMQ action subscriber registered
-  Actions: respawn, pause, resume
-```
-
-**Fix:** Ensure `--zmq-broadcast` flag is used
+**Solutions:**
+- Ensure JavaScript is enabled in browser
+- Check browser console for errors
+- Verify keyboard focus is on browser window
+- Refresh the page (F5)
 
 ## Development
 
-### Adding New Overlays
+### Adding Custom Overlays
 
-Edit `_render_frame()` in `zmq_web_viewer.py`:
+The visualization is handled in the simulation module's visualizer:
 
 ```python
-def _render_frame(self):
-    output = self.latest_frame.copy()
+from simulation.utils.visualizer import Visualizer
 
-    # Your custom overlay here!
-    cv2.putText(output, "Custom Text", (10, 150), ...)
+visualizer = Visualizer()
 
-    self.rendered_frame = output
+# Draw custom overlay
+def draw_custom_info(frame, custom_data):
+    cv2.putText(frame, f"Custom: {custom_data}",
+                (10, 150), cv2.FONT_HERSHEY_SIMPLEX,
+                0.6, (255, 255, 255), 2)
+    return frame
+
+# Use in processing loop
+visualized_frame = visualizer.draw_lanes(frame, detection_result)
+visualized_frame = draw_custom_info(visualized_frame, my_data)
 ```
 
-### Adding New Actions
+### Web Viewer Technology
 
-1. Register action in vehicle (`simulation/run.py`):
-```python
-def handle_custom_action():
-    print("Custom action!")
-    return True
+The web viewer uses:
+- **Flask** - Web server framework
+- **MJPEG streaming** - Real-time video to browser
+- **HTML5/JavaScript** - Interactive UI
+- **OpenCV** - Frame rendering and overlay drawing
 
-action_subscriber.register_action('custom', handle_custom_action)
-```
+### Files
 
-2. Add button in web viewer HTML:
-```html
-<button onclick="sendAction('custom')">Custom Action</button>
-```
-
-## Files
-
-- `zmq_web_viewer.py` - Main viewer implementation
+- `run.py` - Web viewer entry point
 - `__init__.py` - Package exports
-- `README.md` - This file
+- `README.md` - This documentation
 
 ## See Also
 
-- [Architecture Guide](../.docs/NEW_ARCHITECTURE.md)
-- [Quick Start Guide](../.docs/QUICKSTART_NEW_ARCHITECTURE.md)
-- [ZMQ Broadcasting Module](../simulation/integration/zmq_broadcast.py)
+- [Simulation Module](../simulation/README.md) - CARLA orchestration
+- [Detection Module](../lkas/detection/README.md) - Lane detection
+- [Main README](../../README.md) - Project overview
 
 ## License
 
