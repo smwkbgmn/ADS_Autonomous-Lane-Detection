@@ -161,7 +161,6 @@ def control_mode_to_int(mode: ControlMode) -> int:
         ControlMode.MANUAL: 0,
         ControlMode.AUTOPILOT: 1,
         ControlMode.LANE_KEEPING: 2,
-        ControlMode.EMERGENCY_STOP: 3,
     }
     return mode_map.get(mode, 2)  # Default to LANE_KEEPING
 
@@ -172,7 +171,6 @@ def int_to_control_mode(value: int) -> ControlMode:
         0: ControlMode.MANUAL,
         1: ControlMode.AUTOPILOT,
         2: ControlMode.LANE_KEEPING,
-        3: ControlMode.EMERGENCY_STOP,
     }
     return mode_map.get(value, ControlMode.LANE_KEEPING)
 

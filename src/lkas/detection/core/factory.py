@@ -57,7 +57,7 @@ class DetectorFactory:
     def _create_cv_detector(self, **kwargs) -> LaneDetector:
         """Create Computer Vision detector."""
         # Import here to avoid circular dependencies
-        from detection.method.computer_vision.cv_lane_detector import CVLaneDetector
+        from lkas.detection.method.computer_vision.cv_lane_detector import CVLaneDetector
 
         cfg = self.config.cv_detector
 
@@ -79,7 +79,7 @@ class DetectorFactory:
     def _create_dl_detector(self, **kwargs) -> LaneDetector:
         """Create Deep Learning detector."""
         # Import here to avoid circular dependencies
-        from detection.method.deep_learning.lane_net import DLLaneDetector
+        from lkas.detection.method.deep_learning.lane_net import DLLaneDetector
 
         cfg = self.config.dl_detector
 

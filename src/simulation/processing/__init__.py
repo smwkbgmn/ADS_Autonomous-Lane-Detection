@@ -10,7 +10,7 @@ from .frame_processor import FrameProcessor
 from .metrics_logger import MetricsLogger
 
 # Re-export from decision module for backwards compatibility
-from decision.pd_controller import PDController
+from lkas.decision.pd_controller import PDController
 
 __all__ = [
     'FrameProcessor',

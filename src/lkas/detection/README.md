@@ -162,8 +162,8 @@ Neural network-based approach using PyTorch:
 ### Basic Usage
 
 ```python
-from detection.core.config import ConfigManager
-from detection.core.factory import DetectorFactory
+from lkas.detection.core.config import ConfigManager
+from lkas.detection.core.factory import DetectorFactory
 
 # Load configuration
 config = ConfigManager.load('config.yaml')
@@ -207,7 +207,7 @@ Server features:
 ### Integration with Lane Detection Module
 
 ```python
-from detection.detection_module.detector import LaneDetectionModule
+from lkas.detection.detection_module.detector import LaneDetectionModule
 from simulation.integration.messages import ImageMessage
 
 # Initialize module
@@ -262,8 +262,8 @@ dl_detector:
 1. **Create detector class** implementing `LaneDetector`:
 
 ```python
-from detection.core.interfaces import LaneDetector
-from detection.core.models import DetectionResult
+from lkas.detection.core.interfaces import LaneDetector
+from lkas.detection.core.models import DetectionResult
 
 class MyCustomDetector(LaneDetector):
     def detect(self, image: np.ndarray) -> DetectionResult:

@@ -64,6 +64,20 @@ def main():
         "--gpu", type=int, default=None, help="GPU device ID (for DL method)"
     )
 
+    # Connection retry options
+    parser.add_argument(
+        "--retry-count",
+        type=int,
+        default=20,
+        help="Number of retry attempts for shared memory connection (default: 20)",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=0.5,
+        help="Delay between retry attempts in seconds (default: 0.5)",
+    )
+
     args = parser.parse_args()
 
     # Load configuration
@@ -83,7 +97,9 @@ def main():
         config=config,
         detection_method=args.method,
         image_shm_name=args.image_shm_name,
-        detection_shm_name=args.detection_shm_name
+        detection_shm_name=args.detection_shm_name,
+        retry_count=args.retry_count,
+        retry_delay=args.retry_delay,
     )
 
     server.run()

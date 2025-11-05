@@ -52,6 +52,8 @@ class DecisionServer:
         config,
         detection_shm_name: str = "detection_results",
         control_shm_name: str = "control_commands",
+        retry_count: int = 20,
+        retry_delay: float = 0.5,
     ):
         """
         Initialize decision server.
@@ -88,8 +90,8 @@ class DecisionServer:
         self.detection_channel = SharedMemoryDetectionChannel(
             name=detection_shm_name,
             create=False,
-            retry_count=20,
-            retry_delay=0.5,
+            retry_count=retry_count,
+            retry_delay=retry_delay,
         )
         print(f"✓ Connected to detection input")
 
@@ -98,8 +100,8 @@ class DecisionServer:
         self.control_channel = SharedMemoryControlChannel(
             name=control_shm_name,
             create=True,
-            retry_count=20,
-            retry_delay=0.5,
+            retry_count=retry_count,
+            retry_delay=retry_delay,
         )
         print(f"✓ Created control output")
 
@@ -136,41 +138,48 @@ class DecisionServer:
 
         try:
             while self.running:
-                # Read detection from shared memory (non-blocking)
-                detection = self.detection_channel.read()
+                try:
+                    # Read detection from shared memory (non-blocking)
+                    detection = self.detection_channel.read()
 
-                if detection is None:
-                    time.sleep(0.0001)  # 0.1ms sleep
-                    continue
+                    if detection is None:
+                        time.sleep(0.0001)  # 0.1ms sleep
+                        continue
 
-                # Process detection and compute control
-                start_time = time.time()
-                control = self.controller.process_detection(detection)
-                processing_time_ms = (time.time() - start_time) * 1000.0
+                    # Process detection and compute control
+                    start_time = time.time()
+                    control = self.controller.process_detection(detection)
+                    processing_time_ms = (time.time() - start_time) * 1000.0
 
-                # Write control to shared memory using proper control channel
-                self.control_channel.write(
-                    control=control,
-                    frame_id=detection.frame_id,
-                    timestamp=detection.timestamp,
-                    processing_time_ms=processing_time_ms
-                )
-
-                self.frame_count += 1
-
-                # Stats tracking
-                if time.time() - self.last_print_time > 3.0:
-                    fps = self.frame_count / (time.time() - self.last_print_time)
-                    print(
-                        f"\r{fps:.1f} FPS | Frame {detection.frame_id} | "
-                        f"Decision: {processing_time_ms:.2f}ms | "
-                        f"Steering: {control.steering:+.3f} | "
-                        f"Throttle: {control.throttle:.3f}",
-                        end="",
-                        flush=True,
+                    # Write control to shared memory using proper control channel
+                    self.control_channel.write(
+                        control=control,
+                        frame_id=detection.frame_id,
+                        timestamp=detection.timestamp,
+                        processing_time_ms=processing_time_ms
                     )
-                    self.frame_count = 0
-                    self.last_print_time = time.time()
+
+                    self.frame_count += 1
+
+                    # Stats tracking
+                    if time.time() - self.last_print_time > 3.0:
+                        fps = self.frame_count / (time.time() - self.last_print_time)
+                        print(
+                            f"\r{fps:.1f} FPS | Frame {detection.frame_id} | "
+                            f"Decision: {processing_time_ms:.2f}ms | "
+                            f"Steering: {control.steering:+.3f} | "
+                            f"Throttle: {control.throttle:.3f}",
+                            end="",
+                            flush=True,
+                        )
+                        self.frame_count = 0
+                        self.last_print_time = time.time()
+
+                except Exception as e:
+                    print(f"\n✗ Error in decision loop: {type(e).__name__}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
 
         except KeyboardInterrupt:
             print("\n\nStopping decision server...")
@@ -211,6 +220,20 @@ def main():
         help="Shared memory name for control output (default: control_commands)",
     )
 
+    # Connection retry options
+    parser.add_argument(
+        "--retry-count",
+        type=int,
+        default=20,
+        help="Number of retry attempts for shared memory connection (default: 20)",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=0.5,
+        help="Delay between retry attempts in seconds (default: 0.5)",
+    )
+
     args = parser.parse_args()
 
     # Load configuration
@@ -223,6 +246,8 @@ def main():
         config=config,
         detection_shm_name=args.detection_shm_name,
         control_shm_name=args.control_shm_name,
+        retry_count=args.retry_count,
+        retry_delay=args.retry_delay,
     )
 
     server.run()

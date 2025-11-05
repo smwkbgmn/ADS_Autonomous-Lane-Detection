@@ -7,8 +7,8 @@ compatibility by re-exporting it.
 """
 
 # Re-export from decision module for backwards compatibility
-from decision.lane_analyzer import LaneAnalyzer
-from detection.core.models import LaneDepartureStatus
+from lkas.decision.lane_analyzer import LaneAnalyzer
+from lkas.detection.core.models import LaneDepartureStatus
 
 # Simulation-specific visualization
 from .visualizer import LKASVisualizer

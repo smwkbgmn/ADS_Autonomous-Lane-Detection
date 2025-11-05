@@ -6,8 +6,7 @@ Provides visualization utilities for lane detection and LKAS feedback.
 import cv2
 import numpy as np
 from typing import Tuple, Dict
-from .lane_analyzer import LaneDepartureStatus
-from detection.core.models import Lane
+from lkas.detection.core.models import Lane, LaneDepartureStatus
 
 
 class LKASVisualizer:

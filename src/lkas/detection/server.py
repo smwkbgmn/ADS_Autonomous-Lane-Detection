@@ -60,41 +60,52 @@ class DetectionServer:
         print("Detection Server")
         print("=" * 60)
 
-        # 1. Initialize detector (core logic)
-        print(f"\nInitializing {detection_method.upper()} detector...")
-        self.detector = LaneDetection(config, detection_method)
-        print(f"✓ Detector ready: {self.detector.get_detector_name()}")
-        print(f"  Parameters: {self.detector.get_detector_params()}")
+        # Initialize attributes to None for safe cleanup
+        self.image_channel = None
+        self.detection_channel = None
 
-        # 2. Connect to image input (shared memory)
-        print(f"\nConnecting to image shared memory '{image_shm_name}'...")
-        self.image_channel = SharedMemoryImageChannel(
-            name=image_shm_name,
-            shape=(config.camera.height, config.camera.width, 3),
-            create=False,  # Reader mode
-            retry_count=retry_count,
-            retry_delay=retry_delay,
-        )
-        print(f"✓ Connected to image input")
+        try:
+            # 1. Initialize detector (core logic)
+            print(f"\nInitializing {detection_method.upper()} detector...")
+            self.detector = LaneDetection(config, detection_method)
+            print(f"✓ Detector ready: {self.detector.get_detector_name()}")
+            print(f"  Parameters: {self.detector.get_detector_params()}")
 
-        # 3. Create detection output (shared memory)
-        print(f"Creating detection shared memory '{detection_shm_name}'...")
-        self.detection_channel = SharedMemoryDetectionChannel(
-            name=detection_shm_name,
-            create=True,  # Writer mode
-            retry_count=retry_count,
-            retry_delay=retry_delay,
-        )
-        print(f"✓ Created detection output")
+            # 2. Create detection output FIRST (so decision server can connect)
+            print(f"\nCreating detection shared memory '{detection_shm_name}'...")
+            self.detection_channel = SharedMemoryDetectionChannel(
+                name=detection_shm_name,
+                create=True,  # Writer mode
+                retry_count=retry_count,
+                retry_delay=retry_delay,
+            )
+            print(f"✓ Created detection output")
 
-        # Server state
-        self.running = False
-        self.frame_count = 0
-        self.last_print_time = time.time()
+            # 3. Connect to image input (wait for simulation)
+            print(f"\nConnecting to image shared memory '{image_shm_name}'...")
+            self.image_channel = SharedMemoryImageChannel(
+                name=image_shm_name,
+                shape=(config.camera.height, config.camera.width, 3),
+                create=False,  # Reader mode
+                retry_count=retry_count,
+                retry_delay=retry_delay,
+            )
+            print(f"✓ Connected to image input")
 
-        print("\n" + "=" * 60)
-        print("Server initialized successfully!")
-        print("=" * 60)
+            # Server state
+            self.running = False
+            self.frame_count = 0
+            self.last_print_time = time.time()
+
+            print("\n" + "=" * 60)
+            print("Server initialized successfully!")
+            print("=" * 60)
+
+        except Exception as e:
+            # Cleanup on initialization failure
+            print(f"\n✗ Initialization failed: {e}")
+            self._cleanup_on_error()
+            raise
 
     def process_image(self, image_msg: ImageMessage) -> DetectionMessage:
         """
@@ -174,14 +185,30 @@ class DetectionServer:
         """Stop the server and cleanup resources."""
         self.running = False
 
-        # Close channels
-        self.image_channel.close()
-        self.detection_channel.close()
-
-        # Unlink output channel (we created it)
-        self.detection_channel.unlink()
+        # Close channels (check if they exist)
+        if self.image_channel:
+            self.image_channel.close()
+        if self.detection_channel:
+            self.detection_channel.close()
+            # Unlink output channel (we created it)
+            self.detection_channel.unlink()
 
         print("✓ Detection server stopped")
+
+    def _cleanup_on_error(self):
+        """Cleanup resources on initialization error (DON'T unlink shared memory!)."""
+        # Close connections but DON'T unlink shared memory that others might be using
+        if self.image_channel:
+            try:
+                self.image_channel.close()
+            except:
+                pass
+        if self.detection_channel:
+            try:
+                self.detection_channel.close()
+                # DON'T unlink here! Decision server might already be connected
+            except:
+                pass
 
     def get_detector_name(self) -> str:
         """Get the name of the active detector."""
