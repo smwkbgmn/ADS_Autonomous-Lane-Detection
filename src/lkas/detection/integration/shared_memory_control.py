@@ -235,7 +235,7 @@ class SharedMemoryControlChannel:
                 size=self.total_size,
                 name=name
             )
-            print(f"✓ Created control shared memory: {name} ({self.total_size} bytes)")
+            print(f"\n✓ Created control shared memory: {name} ({self.total_size} bytes)")
         else:
             # Reader mode: Retry connection if not yet created
             self.shm = None
@@ -247,10 +247,9 @@ class SharedMemoryControlChannel:
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
                         print(
-                            f"\r  Waiting for control shared memory '{name}' "
+                            f"  Waiting for control shared memory '{name}' "
                             f"(attempt {attempt + 1}/{retry_count})...",
-                            end="",
-                            flush=True
+                            end='\r', flush=True
                         )
                         time.sleep(retry_delay)
                     else:

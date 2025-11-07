@@ -238,11 +238,11 @@ class SharedMemoryImageChannel:
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    print(f"\r✓ Connected to shared memory: {name}                    ")
+                    print(f"\n✓ Connected to shared memory: {name}                    ")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        print(f"\r  Waiting for shared memory '{name}' (attempt {attempt + 1}/{retry_count})...", end="", flush=True)
+                        print(f"\r  Waiting for shared memory '{name}' (attempt {attempt + 1}/{retry_count})...", end="\r", flush=True)
                         time.sleep(retry_delay)
                     else:
                         print()  # Clear the retry line
@@ -414,7 +414,11 @@ class SharedMemoryDetectionChannel:
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
-                        print(f"\r  Waiting for detection shared memory '{name}' (attempt {attempt + 1}/{retry_count})...", end="", flush=True)
+                        print(
+                            f"  Waiting for detection shared memory '{name}'"
+                            f"(attempt {attempt + 1}/{retry_count})...",
+                            end="\r", flush=True
+                        )
                         time.sleep(retry_delay)
                     else:
                         print()  # Clear the retry line

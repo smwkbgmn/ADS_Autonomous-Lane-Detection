@@ -186,3 +186,51 @@ class DecisionController:
     def get_analyzer(self) -> LaneAnalyzer:
         """Get lane analyzer instance."""
         return self.analyzer
+
+    def update_parameter(self, param_name: str, value: float) -> bool:
+        """
+        Update a decision parameter in real-time.
+
+        Args:
+            param_name: Name of parameter to update
+            value: New value
+
+        Returns:
+            True if parameter was updated successfully, False otherwise
+        """
+        # Map of valid parameters and their value constraints
+        valid_params = {
+            'kp': (0.0, 2.0),              # Proportional gain
+            'kd': (0.0, 1.0),              # Derivative gain
+            'throttle_base': (0.0, 1.0),   # Base throttle
+            'throttle_min': (0.0, 1.0),    # Minimum throttle
+            'steer_threshold': (0.0, 1.0), # Steering threshold
+            'steer_max': (0.0, 1.0),       # Maximum steering
+        }
+
+        if param_name not in valid_params:
+            print(f"⚠ Unknown parameter: {param_name}")
+            return False
+
+        # Validate value range
+        min_val, max_val = valid_params[param_name]
+        if not (min_val <= value <= max_val):
+            print(f"⚠ Value {value} out of range [{min_val}, {max_val}] for {param_name}")
+            return False
+
+        # Update the parameter
+        if param_name == 'kp':
+            self.pd_controller.kp = float(value)
+        elif param_name == 'kd':
+            self.pd_controller.kd = float(value)
+        elif param_name == 'throttle_base':
+            self.throttle_policy['base'] = float(value)
+        elif param_name == 'throttle_min':
+            self.throttle_policy['min'] = float(value)
+        elif param_name == 'steer_threshold':
+            self.throttle_policy['steer_threshold'] = float(value)
+        elif param_name == 'steer_max':
+            self.throttle_policy['steer_max'] = float(value)
+
+        print(f"✓ Updated {param_name} = {value}")
+        return True

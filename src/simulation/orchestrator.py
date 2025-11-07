@@ -20,6 +20,7 @@ from simulation.integration.zmq_broadcast import (
     ActionSubscriber,
     DetectionData,
     VehicleState,
+    ParameterBroker,
 )
 from simulation.constants import SimulationConstants
 from rich.console import Console
@@ -46,6 +47,9 @@ class SimulationConfig:
     spawn_point: int | None = None
     control_shm_name: str = "control_commands"
     verbose: bool = False
+    enable_parameter_broker: bool = True
+    parameter_viewer_url: str = "tcp://localhost:5559"
+    parameter_servers_url: str = "tcp://*:5560"
 
 
 class SimulationOrchestrator:
@@ -72,13 +76,14 @@ class SimulationOrchestrator:
         self.system_config = system_config
 
         # Subsystems (initialized in setup methods)
-        self.carla_conn: CARLAConnection | None
-        self.vehicle_mgr: VehicleManager | None
-        self.camera: CameraSensor | None
+        self.carla_conn: CARLAConnection | None = None
+        self.vehicle_mgr: VehicleManager | None = None
+        self.camera: CameraSensor | None = None
         # LKAS system (detection + decision)
-        self.lkas: LKAS | None
-        self.broadcaster: VehicleBroadcaster | None
-        self.action_subscriber: ActionSubscriber | None
+        self.lkas: LKAS | None = None
+        self.broadcaster: VehicleBroadcaster | None = None
+        self.action_subscriber: ActionSubscriber | None = None
+        self.parameter_broker: ParameterBroker | None = None
 
         # State
         self.running = False
@@ -202,6 +207,15 @@ class SimulationOrchestrator:
         self.action_subscriber = ActionSubscriber(bind_url=self.config.action_url)
         print("✓ ZMQ broadcaster ready")
 
+        # Setup parameter broker if enabled
+        if self.config.enable_parameter_broker:
+            print("\nInitializing parameter broker...")
+            self.parameter_broker = ParameterBroker(
+                viewer_url=self.config.parameter_viewer_url,
+                servers_url=self.config.parameter_servers_url
+            )
+            print("✓ Parameter broker ready")
+
     def _setup_event_handlers(self):
         """Setup event handlers for actions."""
         if not self.action_subscriber:
@@ -269,6 +283,10 @@ class SimulationOrchestrator:
                 # Poll for actions
                 if self.action_subscriber:
                     self.action_subscriber.poll()
+
+                # Poll parameter broker to forward parameter updates
+                if self.parameter_broker:
+                    self.parameter_broker.poll()
 
                 # Broadcast state periodically (even when paused)
                 if self.broadcaster and time.time() - last_state_broadcast > 1.0:
@@ -487,6 +505,10 @@ class SimulationOrchestrator:
         """Cleanup all resources."""
         self._clear_footer()
         print("\nCleaning up...")
+
+        # Cleanup parameter broker
+        if self.parameter_broker:
+            self.parameter_broker.close()
 
         # Cleanup LKAS
         if self.lkas:

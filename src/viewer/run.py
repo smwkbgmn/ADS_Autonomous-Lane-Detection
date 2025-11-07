@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from simulation.integration.zmq_broadcast import ViewerSubscriber, ActionPublisher, DetectionData, VehicleState
+from simulation.integration.zmq_broadcast import ViewerSubscriber, ActionPublisher, DetectionData, VehicleState, ParameterPublisher
 from simulation.utils.visualizer import LKASVisualizer
 from lkas.detection.core.models import LaneDepartureStatus
 
@@ -40,6 +40,7 @@ class ZMQWebViewer:
     def __init__(self,
                  vehicle_url: str = "tcp://localhost:5557",
                  action_url: str = "tcp://localhost:5558",
+                 parameter_bind_url: str = "tcp://*:5559",
                  web_port: int = 8080):
         """
         Initialize ZMQ web viewer.
@@ -47,15 +48,18 @@ class ZMQWebViewer:
         Args:
             vehicle_url: ZMQ URL to receive data from vehicle
             action_url: ZMQ URL to send actions to vehicle
+            parameter_bind_url: ZMQ URL to bind for parameter updates (acts as server)
             web_port: HTTP port for web interface
         """
         self.vehicle_url = vehicle_url
         self.action_url = action_url
+        self.parameter_bind_url = parameter_bind_url
         self.web_port = web_port
 
         # ZMQ communication
         self.subscriber = ViewerSubscriber(vehicle_url)
         self.action_publisher = ActionPublisher(action_url)
+        self.parameter_publisher = ParameterPublisher(bind_url=parameter_bind_url)
 
         # Visualization
         self.visualizer = LKASVisualizer()
@@ -79,7 +83,8 @@ class ZMQWebViewer:
         print("ZMQ Web Viewer - Laptop Side")
         print(f"{'='*60}")
         print(f"  Receiving from: {vehicle_url}")
-        print(f"  Sending to: {action_url}")
+        print(f"  Sending actions to: {action_url}")
+        print(f"  Parameter server: {parameter_bind_url}")
         print(f"  Web interface: http://localhost:{web_port}")
         print(f"{'='*60}\n")
 
@@ -213,7 +218,7 @@ class ZMQWebViewer:
                 # Suppress routine logs (200, 204)
 
             def do_POST(self):
-                """Handle POST requests for actions."""
+                """Handle POST requests for actions and parameters."""
                 if self.path == '/action':
                     try:
                         content_length = int(self.headers['Content-Length'])
@@ -239,6 +244,40 @@ class ZMQWebViewer:
                         self.end_headers()
                         response = json.dumps({'status': 'error', 'message': str(e)})
                         self.wfile.write(response.encode())
+
+                elif self.path == '/parameter':
+                    try:
+                        content_length = int(self.headers['Content-Length'])
+                        post_data = self.rfile.read(content_length)
+                        data = json.loads(post_data.decode('utf-8'))
+
+                        category = data.get('category')  # 'detection' or 'decision'
+                        parameter = data.get('parameter')
+                        value = float(data.get('value'))
+
+                        # Send parameter update via ZMQ
+                        viewer_self.parameter_publisher.send_parameter(category, parameter, value)
+
+                        # Send success response
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        response = json.dumps({
+                            'status': 'ok',
+                            'category': category,
+                            'parameter': parameter,
+                            'value': value
+                        })
+                        self.wfile.write(response.encode())
+
+                    except Exception as e:
+                        print(f"[Parameter] Error: {e}")
+                        self.send_response(500)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        response = json.dumps({'status': 'error', 'message': str(e)})
+                        self.wfile.write(response.encode())
+
                 else:
                     self.send_error(404)
 
@@ -423,6 +462,40 @@ class ZMQWebViewer:
                         .notification.error {{
                             background: #f44336;
                         }}
+                        .params-container {{
+                            margin-top: 20px;
+                            display: grid;
+                            grid-template-columns: 1fr 1fr;
+                            gap: 20px;
+                        }}
+                        .param-section {{
+                            padding: 15px;
+                            background: #2d2d2d;
+                            border-radius: 8px;
+                        }}
+                        .param-section h3 {{
+                            margin: 0 0 15px 0;
+                            font-size: 16px;
+                            color: #2196F3;
+                        }}
+                        .param-control {{
+                            margin-bottom: 12px;
+                        }}
+                        .param-control label {{
+                            display: block;
+                            margin-bottom: 5px;
+                            font-size: 13px;
+                            color: #aaa;
+                        }}
+                        .param-control input[type="range"] {{
+                            width: 100%;
+                            margin-bottom: 5px;
+                        }}
+                        .param-value {{
+                            font-size: 12px;
+                            color: #4CAF50;
+                            font-family: monospace;
+                        }}
                     </style>
                 </head>
                 <body>
@@ -446,12 +519,119 @@ class ZMQWebViewer:
                                 <strong>Benefits:</strong> Overlays rendered on laptop, vehicle CPU stays free!
                             </div>
                         </div>
+
+                        <div class="params-container">
+                            <div class="param-section">
+                                <h3>🔍 Detection Parameters</h3>
+                                <div class="param-control">
+                                    <label>Canny Low Threshold</label>
+                                    <input type="range" id="canny_low" min="1" max="150" value="50" step="1"
+                                           oninput="updateParam('detection', 'canny_low', this.value)">
+                                    <span class="param-value" id="canny_low_val">50</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Canny High Threshold</label>
+                                    <input type="range" id="canny_high" min="50" max="255" value="150" step="1"
+                                           oninput="updateParam('detection', 'canny_high', this.value)">
+                                    <span class="param-value" id="canny_high_val">150</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Hough Threshold</label>
+                                    <input type="range" id="hough_threshold" min="1" max="150" value="50" step="1"
+                                           oninput="updateParam('detection', 'hough_threshold', this.value)">
+                                    <span class="param-value" id="hough_threshold_val">50</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Hough Min Line Length</label>
+                                    <input type="range" id="hough_min_line_len" min="10" max="150" value="40" step="5"
+                                           oninput="updateParam('detection', 'hough_min_line_len', this.value)">
+                                    <span class="param-value" id="hough_min_line_len_val">40</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Smoothing Factor</label>
+                                    <input type="range" id="smoothing_factor" min="0" max="1" value="0.7" step="0.05"
+                                           oninput="updateParam('detection', 'smoothing_factor', this.value)">
+                                    <span class="param-value" id="smoothing_factor_val">0.70</span>
+                                </div>
+                            </div>
+
+                            <div class="param-section">
+                                <h3>🎯 Decision (PID Control) Parameters</h3>
+                                <div class="param-control">
+                                    <label>Kp (Proportional Gain)</label>
+                                    <input type="range" id="kp" min="0" max="2" value="0.5" step="0.05"
+                                           oninput="updateParam('decision', 'kp', this.value)">
+                                    <span class="param-value" id="kp_val">0.50</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Kd (Derivative Gain)</label>
+                                    <input type="range" id="kd" min="0" max="1" value="0.1" step="0.05"
+                                           oninput="updateParam('decision', 'kd', this.value)">
+                                    <span class="param-value" id="kd_val">0.10</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Base Throttle</label>
+                                    <input type="range" id="throttle_base" min="0" max="0.5" value="0.14" step="0.01"
+                                           oninput="updateParam('decision', 'throttle_base', this.value)">
+                                    <span class="param-value" id="throttle_base_val">0.14</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Min Throttle</label>
+                                    <input type="range" id="throttle_min" min="0" max="0.2" value="0.05" step="0.01"
+                                           oninput="updateParam('decision', 'throttle_min', this.value)">
+                                    <span class="param-value" id="throttle_min_val">0.05</span>
+                                </div>
+                                <div class="param-control">
+                                    <label>Steer Threshold</label>
+                                    <input type="range" id="steer_threshold" min="0" max="0.5" value="0.15" step="0.01"
+                                           oninput="updateParam('decision', 'steer_threshold', this.value)">
+                                    <span class="param-value" id="steer_threshold_val">0.15</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="notification" id="notification"></div>
 
                     <script>
                         let isPaused = false;
+
+                        function updateParam(category, parameter, value) {{
+                            // Update display
+                            const displayElem = document.getElementById(parameter + '_val');
+                            if (displayElem) {{
+                                // Format value based on parameter type
+                                if (parameter.includes('throttle') || parameter.includes('kp') ||
+                                    parameter.includes('kd') || parameter.includes('steer') ||
+                                    parameter.includes('smoothing')) {{
+                                    displayElem.textContent = parseFloat(value).toFixed(2);
+                                }} else {{
+                                    displayElem.textContent = Math.round(value);
+                                }}
+                            }}
+
+                            // Send to server
+                            fetch('/parameter', {{
+                                method: 'POST',
+                                headers: {{
+                                    'Content-Type': 'application/json',
+                                }},
+                                body: JSON.stringify({{
+                                    category: category,
+                                    parameter: parameter,
+                                    value: parseFloat(value)
+                                }})
+                            }})
+                            .then(response => response.json())
+                            .then(data => {{
+                                if (data.status !== 'ok') {{
+                                    console.error('Parameter update failed:', data);
+                                }}
+                            }})
+                            .catch(error => {{
+                                console.error('Parameter update error:', error);
+                            }});
+                        }}
 
                         function updateButtonState(paused) {{
                             isPaused = paused;
@@ -577,6 +757,7 @@ class ZMQWebViewer:
 
         self.subscriber.close()
         self.action_publisher.close()
+        self.parameter_publisher.close()
 
         print("✓ ZMQ Web Viewer stopped")
 
@@ -602,6 +783,8 @@ def main():
                        help="ZMQ URL to receive vehicle data")
     parser.add_argument('--actions', type=str, default="tcp://localhost:5558",
                        help="ZMQ URL to send actions")
+    parser.add_argument('--parameters', type=str, default="tcp://localhost:5559",
+                       help="ZMQ URL to send parameter updates")
     parser.add_argument('--port', type=int, default=None,
                        help="HTTP port for web interface (overrides config, default: from config.yaml)")
 
@@ -617,6 +800,7 @@ def main():
     viewer = ZMQWebViewer(
         vehicle_url=args.vehicle,
         action_url=args.actions,
+        parameter_bind_url=args.parameters,
         web_port=web_port
     )
 

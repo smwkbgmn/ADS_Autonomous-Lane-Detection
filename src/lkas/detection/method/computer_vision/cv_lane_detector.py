@@ -204,6 +204,54 @@ class CVLaneDetector(LaneDetector):
         self.prev_right_lane = None
         self.frame_count = 0
 
+    def update_parameter(self, param_name: str, value: float) -> bool:
+        """
+        Update a detector parameter in real-time.
+
+        Args:
+            param_name: Name of parameter to update
+            value: New value
+
+        Returns:
+            True if parameter was updated successfully, False otherwise
+        """
+        # Map of valid parameters and their value constraints
+        valid_params = {
+            'canny_low': (1, 255),
+            'canny_high': (1, 255),
+            'hough_threshold': (1, 200),
+            'hough_min_line_len': (1, 200),
+            'hough_max_line_gap': (1, 300),
+            'smoothing_factor': (0.0, 1.0),
+        }
+
+        if param_name not in valid_params:
+            print(f"⚠ Unknown parameter: {param_name}")
+            return False
+
+        # Validate value range
+        min_val, max_val = valid_params[param_name]
+        if not (min_val <= value <= max_val):
+            print(f"⚠ Value {value} out of range [{min_val}, {max_val}] for {param_name}")
+            return False
+
+        # Update the parameter
+        if param_name == 'canny_low':
+            self.canny_low = int(value)
+        elif param_name == 'canny_high':
+            self.canny_high = int(value)
+        elif param_name == 'hough_threshold':
+            self.hough_threshold = int(value)
+        elif param_name == 'hough_min_line_len':
+            self.hough_min_line_len = int(value)
+        elif param_name == 'hough_max_line_gap':
+            self.hough_max_line_gap = int(value)
+        elif param_name == 'smoothing_factor':
+            self.smoothing_factor = float(value)
+
+        print(f"✓ Updated {param_name} = {value}")
+        return True
+
     # =========================================================================
     # PRIVATE HELPER METHODS
     # These start with _ (Python convention for "private")

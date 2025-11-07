@@ -44,6 +44,8 @@ class DetectionServer:
         detection_shm_name: str = "detection_results",
         retry_count: int = 20,
         retry_delay: float = 0.5,
+        enable_parameter_updates: bool = True,
+        parameter_broker_url: str = "tcp://localhost:5560",
     ):
         """
         Initialize detection server.
@@ -55,6 +57,8 @@ class DetectionServer:
             detection_shm_name: Shared memory name for detection output
             retry_count: Connection retry attempts
             retry_delay: Delay between retries (seconds)
+            enable_parameter_updates: Enable real-time parameter updates via ZMQ
+            parameter_broker_url: ZMQ URL for parameter broker
         """
         print("\n" + "=" * 60)
         print("Detection Server")
@@ -97,6 +101,17 @@ class DetectionServer:
             self.frame_count = 0
             self.last_print_time = time.time()
 
+            # Setup parameter updates if enabled
+            self.param_subscriber = None
+            if enable_parameter_updates:
+                # Lazy import to avoid circular dependency
+                from simulation.integration.zmq_broadcast import ParameterSubscriber
+
+                print(f"\nSetting up real-time parameter updates...")
+                self.param_subscriber = ParameterSubscriber(connect_url=parameter_broker_url)
+                self.param_subscriber.register_callback('detection', self._on_parameter_update)
+                print(f"✓ Parameter updates enabled")
+
             print("\n" + "=" * 60)
             print("Server initialized successfully!")
             print("=" * 60)
@@ -118,6 +133,26 @@ class DetectionServer:
             Detection message with lane results
         """
         return self.detector.process_image(image_msg)
+
+    def _on_parameter_update(self, param_name: str, value: float):
+        """
+        Handle real-time parameter update.
+
+        Args:
+            param_name: Parameter name
+            value: New value
+        """
+        # Try to update the detector's underlying method
+        detector_impl = self.detector.detector  # Access the actual CV/DL detector
+
+        if hasattr(detector_impl, 'update_parameter'):
+            success = detector_impl.update_parameter(param_name, value)
+            if success:
+                print(f"[Detection] Parameter updated: {param_name} = {value}")
+            else:
+                print(f"[Detection] Failed to update parameter: {param_name}")
+        else:
+            print(f"[Detection] Detector does not support parameter updates")
 
     def run(self, print_stats: bool = True):
         """
@@ -147,6 +182,10 @@ class DetectionServer:
 
         try:
             while self.running:
+                # Poll for parameter updates (non-blocking)
+                if self.param_subscriber:
+                    self.param_subscriber.poll()
+
                 # Read image from shared memory (non-blocking with timeout)
                 image_msg = self.image_channel.read_blocking(timeout=0.1, copy=True)
 
@@ -184,6 +223,10 @@ class DetectionServer:
     def stop(self):
         """Stop the server and cleanup resources."""
         self.running = False
+
+        # Close parameter subscriber
+        if self.param_subscriber:
+            self.param_subscriber.close()
 
         # Close channels (check if they exist)
         if self.image_channel:

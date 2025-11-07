@@ -61,6 +61,15 @@ class VehicleState:
     paused: Optional[bool] = None  # Simulation paused state
 
 
+@dataclass
+class ParameterUpdate:
+    """Parameter update message for real-time tuning."""
+    category: str  # 'detection' or 'decision'
+    parameter: str  # Parameter name (e.g., 'canny_low', 'kp')
+    value: float    # New parameter value
+    timestamp: float = 0.0
+
+
 class VehicleBroadcaster:
     """
     Publisher: Broadcasts vehicle data to remote viewers.
@@ -505,6 +514,202 @@ class ActionSubscriber:
     def close(self):
         """Close subscriber."""
         self.socket.close()
+        self.context.term()
+
+
+class ParameterPublisher:
+    """
+    Publisher: Sends parameter updates from viewer to vehicle/simulation.
+
+    Runs in viewer process. Publishes real-time parameter adjustments.
+    """
+
+    def __init__(self, bind_url: str = "tcp://*:5559"):
+        """
+        Initialize parameter publisher.
+
+        Args:
+            bind_url: ZMQ URL to bind to (acts as server)
+        """
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.PUB)
+        self.socket.bind(bind_url)
+
+        # Give ZMQ time to establish
+        time.sleep(0.1)
+
+    def send_parameter(self, category: str, parameter: str, value: float):
+        """
+        Send parameter update.
+
+        Args:
+            category: 'detection' or 'decision'
+            parameter: Parameter name
+            value: New value
+        """
+        update = ParameterUpdate(
+            category=category,
+            parameter=parameter,
+            value=value,
+            timestamp=time.time()
+        )
+
+        message = asdict(update)
+
+        self.socket.send_multipart([
+            b'parameter',
+            json.dumps(message).encode('utf-8')
+        ])
+
+        print(f"[Param] Sent: {category}.{parameter} = {value}")
+
+    def close(self):
+        """Close publisher."""
+        self.socket.close()
+        self.context.term()
+
+
+class ParameterSubscriber:
+    """
+    Subscriber: Receives parameter updates in detection/decision servers.
+
+    Runs in detection and decision servers. Applies parameter changes in real-time.
+    """
+
+    def __init__(self, connect_url: str = "tcp://localhost:5559"):
+        """
+        Initialize parameter subscriber.
+
+        Args:
+            connect_url: ZMQ URL to connect to parameter broker
+        """
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.SUB)
+        self.socket.connect(connect_url)
+        self.socket.setsockopt(zmq.SUBSCRIBE, b'parameter')
+        self.socket.setsockopt(zmq.RCVTIMEO, 10)  # 10ms timeout for non-blocking
+
+        print(f"✓ Parameter subscriber connected to {connect_url}")
+
+        # Callbacks for different categories
+        self.parameter_callbacks: Dict[str, Callable[[str, float], None]] = {}
+
+    def register_callback(self, category: str, callback: Callable[[str, float], None]):
+        """
+        Register callback for parameter updates.
+
+        Args:
+            category: Category to listen for ('detection' or 'decision')
+            callback: Function(parameter_name, value) to handle updates
+        """
+        self.parameter_callbacks[category] = callback
+        print(f"  Registered parameter callback for: {category}")
+
+    def poll(self) -> bool:
+        """
+        Poll for parameter updates (non-blocking).
+
+        Returns:
+            True if received update, False otherwise
+        """
+        try:
+            parts = self.socket.recv_multipart(zmq.NOBLOCK)
+            topic = parts[0].decode('utf-8')
+            data = json.loads(parts[1].decode('utf-8'))
+
+            if topic == 'parameter':
+                update = ParameterUpdate(**data)
+
+                # Call registered callback for this category
+                if update.category in self.parameter_callbacks:
+                    self.parameter_callbacks[update.category](
+                        update.parameter,
+                        update.value
+                    )
+                    return True
+
+            return False
+
+        except zmq.Again:
+            # No message available
+            return False
+        except Exception as e:
+            print(f"⚠ Error receiving parameter: {e}")
+            return False
+
+    def close(self):
+        """Close subscriber."""
+        self.socket.close()
+        self.context.term()
+
+
+class ParameterBroker:
+    """
+    Broker: Subscribes to parameter updates and re-publishes them.
+
+    Runs in simulation/orchestrator. Acts as central hub for parameter distribution.
+    """
+
+    def __init__(self, viewer_url: str = "tcp://localhost:5559",
+                 servers_url: str = "tcp://*:5560"):
+        """
+        Initialize parameter broker.
+
+        Args:
+            viewer_url: URL to receive parameters from viewer (connect to viewer's publisher)
+            servers_url: URL to broadcast parameters to detection/decision (bind for servers)
+        """
+        self.context = zmq.Context()
+
+        # Subscriber socket (receives from viewer - connects to viewer's PUB)
+        self.sub_socket = self.context.socket(zmq.SUB)
+        self.sub_socket.connect(viewer_url)
+        self.sub_socket.setsockopt(zmq.SUBSCRIBE, b'parameter')
+        self.sub_socket.setsockopt(zmq.RCVTIMEO, 10)
+
+        # Publisher socket (sends to detection/decision - binds for servers)
+        self.pub_socket = self.context.socket(zmq.PUB)
+        self.pub_socket.bind(servers_url)
+
+        time.sleep(0.1)  # Let sockets establish
+
+        print(f"✓ Parameter broker started")
+        print(f"  Subscribing from viewer: {viewer_url}")
+        print(f"  Publishing to servers: {servers_url}")
+
+    def poll(self) -> bool:
+        """
+        Poll for parameters and rebroadcast them.
+
+        Returns:
+            True if message was forwarded, False otherwise
+        """
+        try:
+            # Receive from viewer
+            parts = self.sub_socket.recv_multipart(zmq.NOBLOCK)
+
+            # Forward to detection/decision servers
+            self.pub_socket.send_multipart(parts)
+
+            # Log the parameter change
+            topic = parts[0].decode('utf-8')
+            data = json.loads(parts[1].decode('utf-8'))
+            if topic == 'parameter':
+                update = ParameterUpdate(**data)
+                print(f"[Broker] Forwarded: {update.category}.{update.parameter} = {update.value}")
+
+            return True
+
+        except zmq.Again:
+            return False
+        except Exception as e:
+            print(f"⚠ Broker error: {e}")
+            return False
+
+    def close(self):
+        """Close broker."""
+        self.sub_socket.close()
+        self.pub_socket.close()
         self.context.term()
 
 
