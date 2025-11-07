@@ -242,7 +242,7 @@ class SharedMemoryControlChannel:
             for attempt in range(retry_count):
                 try:
                     self.shm = shared_memory.SharedMemory(name=name)
-                    print(f"✓ Connected to control shared memory: {name}")
+                    print(f"\r✓ Connected to control shared memory: {name}                    ")
                     break
                 except FileNotFoundError:
                     if attempt < retry_count - 1:
@@ -254,6 +254,7 @@ class SharedMemoryControlChannel:
                         )
                         time.sleep(retry_delay)
                     else:
+                        print()  # Clear the retry line
                         raise ConnectionError(
                             f"Control shared memory '{name}' not found after {retry_count} attempts. "
                             f"Make sure the decision server is running."

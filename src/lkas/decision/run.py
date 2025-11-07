@@ -114,8 +114,12 @@ class DecisionServer:
         print("=" * 60)
 
 
-    def run(self):
-        """Start serving decision requests."""
+    def run(self, print_stats: bool = True):
+        """Start serving decision requests.
+
+        Args:
+            print_stats: Whether to print FPS and latency statistics
+        """
 
         # Register signal handler for graceful shutdown
         def signal_handler(sig, frame):
@@ -161,8 +165,8 @@ class DecisionServer:
 
                     self.frame_count += 1
 
-                    # Stats tracking
-                    if time.time() - self.last_print_time > 3.0:
+                    # Stats tracking (only if enabled)
+                    if print_stats and time.time() - self.last_print_time > 3.0:
                         fps = self.frame_count / (time.time() - self.last_print_time)
                         print(
                             f"\r{fps:.1f} FPS | Frame {detection.frame_id} | "
@@ -233,6 +237,11 @@ def main():
         default=0.5,
         help="Delay between retry attempts in seconds (default: 0.5)",
     )
+    parser.add_argument(
+        "--no-stats",
+        action="store_true",
+        help="Disable FPS and latency statistics output",
+    )
 
     args = parser.parse_args()
 
@@ -250,7 +259,7 @@ def main():
         retry_delay=args.retry_delay,
     )
 
-    server.run()
+    server.run(print_stats=not args.no_stats)
 
     return 0
 

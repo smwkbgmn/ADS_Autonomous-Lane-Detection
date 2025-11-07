@@ -106,10 +106,6 @@ class ZMQWebViewer:
     def _on_frame_received(self, image: np.ndarray, metadata: Dict):
         """Called when new frame received from vehicle."""
         self.latest_frame = image
-        # Debug: print first time we receive a frame
-        if not hasattr(self, '_frame_received_logged'):
-            print(f"[Viewer] First frame received: shape={image.shape}, dtype={image.dtype}")
-            self._frame_received_logged = True
 
         # Render frame with overlays (on laptop, not vehicle!)
         self._render_frame()
@@ -133,11 +129,6 @@ class ZMQWebViewer:
         """
         if self.latest_frame is None:
             return
-
-        # Debug: log first render
-        if not hasattr(self, '_render_logged'):
-            print(f"[Viewer] First render: frame shape={self.latest_frame.shape}")
-            self._render_logged = True
 
         # Start with original frame
         output = self.latest_frame.copy()
@@ -198,11 +189,6 @@ class ZMQWebViewer:
         # Store rendered frame
         self.rendered_frame = output
 
-        # Debug: log first stored frame
-        if not hasattr(self, '_stored_logged'):
-            print(f"[Viewer] First rendered frame stored: shape={output.shape}")
-            self._stored_logged = True
-
     def _zmq_poll_loop(self):
         """ZMQ polling loop (runs in separate thread)."""
         print("[ZMQ] Polling loop started")
@@ -216,7 +202,6 @@ class ZMQWebViewer:
 
     def _start_http_server(self):
         """Start HTTP server for web interface."""
-        print("[DEBUG] _start_http_server() called")
         viewer_self = self
 
         class ViewerRequestHandler(BaseHTTPRequestHandler):
@@ -235,8 +220,6 @@ class ZMQWebViewer:
                         post_data = self.rfile.read(content_length)
                         data = json.loads(post_data.decode('utf-8'))
                         action = data.get('action')
-
-                        print(f"[Action] Browser requested: {action}")
 
                         # Send action to vehicle via ZMQ
                         # The viewer will update its footer when it receives the state update from simulation
@@ -260,21 +243,16 @@ class ZMQWebViewer:
                     self.send_error(404)
 
             def do_GET(self):
-                print(f"[HTTP] GET request: {self.path}")
-
                 if self.path == '/':
                     # Serve HTML page
-                    print("[HTTP] Serving HTML page")
                     self.send_response(200)
                     self.send_header('Content-type', 'text/html')
                     self.end_headers()
                     html = self._get_html()
                     self.wfile.write(html.encode())
-                    print("[HTTP] HTML page sent")
 
                 elif self.path == '/stream':
                     # Serve MJPEG stream
-                    print("[HTTP] Client connected to /stream")
                     self.send_response(200)
                     self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=--jpgboundary')
                     self.send_header('Cache-Control', 'no-cache, private')
@@ -323,7 +301,6 @@ class ZMQWebViewer:
 
                 elif self.path == '/health':
                     # Health check endpoint
-                    print("[HTTP] Health check requested")
                     self.send_response(200)
                     self.send_header('Content-Type', 'text/plain')
                     self.end_headers()
@@ -563,7 +540,6 @@ class ZMQWebViewer:
         # Start HTTP server with error handling wrapper
         def serve_with_error_handling():
             try:
-                print("[HTTP] Server thread starting serve_forever()")
                 self.http_server.serve_forever()
             except Exception as e:
                 print(f"[HTTP] Server thread crashed: {e}")
@@ -571,9 +547,7 @@ class ZMQWebViewer:
                 traceback.print_exc()
 
         try:
-            print(f"[HTTP] Creating server on port {self.web_port}")
             self.http_server = ThreadingHTTPServer(('0.0.0.0', self.web_port), ViewerRequestHandler)
-            print(f"[HTTP] Server created, starting thread")
             self.http_thread = Thread(target=serve_with_error_handling, daemon=True)
             self.http_thread.start()
 
@@ -587,8 +561,6 @@ class ZMQWebViewer:
                 print(f"  Local access: http://localhost:{self.web_port}")
                 print(f"  Remote access (via VSCode): http://localhost:{self.web_port}")
                 print(f"")
-                print(f"  💡 TIP: If accessing from laptop, ensure port {self.web_port} is")
-                print(f"          forwarded in VSCode's 'Ports' tab!")
             else:
                 print(f"✗ HTTP server thread died immediately!")
         except Exception as e:

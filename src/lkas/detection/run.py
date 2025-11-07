@@ -77,6 +77,11 @@ def main():
         default=0.5,
         help="Delay between retry attempts in seconds (default: 0.5)",
     )
+    parser.add_argument(
+        "--no-stats",
+        action="store_true",
+        help="Disable FPS and latency statistics output",
+    )
 
     args = parser.parse_args()
 
@@ -102,7 +107,7 @@ def main():
         retry_delay=args.retry_delay,
     )
 
-    server.run()
+    server.run(print_stats=not args.no_stats)
 
     return 0
 

@@ -91,6 +91,9 @@ class VehicleBroadcaster:
         # Stats
         self.frame_count = 0
         self.last_print_time = time.time()
+        self.current_fps = 0.0
+        self.current_frame_id = 0
+        self.current_kb = 0.0
 
         # Give ZMQ time to establish connection (slow joiner problem)
         time.sleep(0.1)
@@ -131,10 +134,14 @@ class VehicleBroadcaster:
 
         self.frame_count += 1
 
-        # Print stats every 3 seconds
+        # Update stats every 3 seconds
         if time.time() - self.last_print_time > 3.0:
             fps = self.frame_count / (time.time() - self.last_print_time)
-            print(f"\r[Broadcaster] {fps:.1f} FPS | Frame {frame_id} | {len(buffer)/1024:.1f} KB", end="", flush=True)
+            self.current_fps = fps
+            self.current_frame_id = frame_id
+            self.current_kb = len(buffer) / 1024.0
+            # Suppress print - orchestrator will display in footer
+            # print(f"\r[Broadcaster] {fps:.1f} FPS | Frame {frame_id} | {len(buffer)/1024:.1f} KB", end="", flush=True)
             self.frame_count = 0
             self.last_print_time = time.time()
 
@@ -155,6 +162,14 @@ class VehicleBroadcaster:
             b'state',
             json.dumps(message).encode('utf-8')
         ])
+
+    def get_stats(self) -> dict:
+        """Get current broadcaster statistics."""
+        return {
+            'fps': self.current_fps,
+            'frame_id': self.current_frame_id,
+            'kb': self.current_kb
+        }
 
     def close(self):
         """Close broadcaster."""
@@ -194,8 +209,6 @@ class ViewerSubscriber:
 
         # High water mark
         self.socket.setsockopt(zmq.RCVHWM, 10)
-
-        print(f"✓ Viewer subscriber connected to {connect_url}")
 
         # Callbacks
         self.frame_callback: Optional[Callable] = None
@@ -413,8 +426,6 @@ class ActionPublisher:
         # Give ZMQ time to establish
         time.sleep(0.1)
 
-        print(f"✓ Action publisher connected to {connect_url}")
-
     def send_action(self, action: str, params: Optional[Dict[str, Any]] = None):
         """
         Send action command.
@@ -433,8 +444,6 @@ class ActionPublisher:
             b'action',
             json.dumps(message).encode('utf-8')
         ])
-
-        print(f"[Action] Sent: {action}")
 
     def close(self):
         """Close publisher."""

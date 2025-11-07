@@ -41,6 +41,7 @@ class LKASLauncher:
         image_shm_name: str = "camera_feed",
         detection_shm_name: str = "detection_results",
         control_shm_name: str = "control_commands",
+        verbose: bool = False,
     ):
         """
         Initialize LKAS launcher.
@@ -52,6 +53,7 @@ class LKASLauncher:
             image_shm_name: Shared memory name for camera images
             detection_shm_name: Shared memory name for detection results
             control_shm_name: Shared memory name for control commands
+            verbose: Enable verbose output (FPS stats, latency info)
         """
         self.method = method
         self.config = config
@@ -59,6 +61,7 @@ class LKASLauncher:
         self.image_shm_name = image_shm_name
         self.detection_shm_name = detection_shm_name
         self.control_shm_name = control_shm_name
+        self.verbose = verbose
 
         self.detection_process: Optional[subprocess.Popen] = None
         self.decision_process: Optional[subprocess.Popen] = None
@@ -67,12 +70,12 @@ class LKASLauncher:
         # Terminal display with persistent footer
         self.enable_footer = True
         self.terminal = TerminalDisplay(enable_footer=self.enable_footer)
-        self.detection_logger = OrderedLogger("[Detector]", self.terminal)
-        self.decision_logger = OrderedLogger("[Controller]", self.terminal)
+        self.detection_logger = OrderedLogger("[DET]", self.terminal)
+        self.decision_logger = OrderedLogger("[CNT]", self.terminal)
 
-        # Stats tracking
-        self.last_detection_stats = ""
-        self.last_decision_stats = ""
+        # Connection tracking
+        self.detection_connected = False
+        self.decision_connected = False
 
         # Initialization phase tracking
         self.buffering_mode = True
@@ -101,6 +104,9 @@ class LKASLauncher:
         if self.gpu is not None and self.method == "dl":
             cmd.extend(["--gpu", str(self.gpu)])
 
+        if not self.verbose:
+            cmd.append("--no-stats")
+
         return cmd
 
     def _build_decision_cmd(self) -> List[str]:
@@ -121,6 +127,9 @@ class LKASLauncher:
 
         if self.config:
             cmd.extend(["--config", self.config])
+
+        if not self.verbose:
+            cmd.append("--no-stats")
 
         return cmd
 
@@ -160,28 +169,32 @@ class LKASLauncher:
                 return
 
             try:
-                line = process.stdout.readline()
-                if line:
-                    line = line.decode('utf-8').rstrip()
-                    if line:  # Only print non-empty lines
-                        # Check if this is a stats line (starts with \r or contains FPS)
-                        # Stats lines format: "\r45.2 FPS | Frame 1234 | ..."
-                        is_stats = line.startswith('\r') or ('FPS' in line and '|' in line)
+                # Read available data (non-blocking)
+                # Stats lines end with \r, regular lines end with \n
+                data = process.stdout.read(4096)  # Read up to 4KB
+                if data:
+                    lines_raw = data.decode('utf-8')
+                    # Split by both \n and \r, keeping empty strings
+                    lines = lines_raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
 
-                        if is_stats:
-                            # Update stats tracking - strip \r and whitespace
-                            stats_text = line.lstrip('\r').strip()
-                            if prefix == "DETECTION":
-                                self.last_detection_stats = stats_text
-                            else:
-                                self.last_decision_stats = stats_text
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        # Mark as connected when we receive any output
+                        if "DETECTION" in prefix and not self.detection_connected:
+                            self.detection_connected = True
                             self._update_footer()
+                        elif "DECISION" in prefix and not self.decision_connected:
+                            self.decision_connected = True
+                            self._update_footer()
+
+                        # Print message (buffer or print depending on mode)
+                        if self.buffering_mode:
+                            logger.log(line)
                         else:
-                            # Regular message - buffer or print depending on mode
-                            if self.buffering_mode:
-                                logger.log(line)
-                            else:
-                                logger.print_immediate(line)
+                            logger.print_immediate(line)
 
                         # Log to file
                         if hasattr(self, 'log_file') and self.log_file:
@@ -192,27 +205,32 @@ class LKASLauncher:
             except Exception:
                 pass
         else:
-            # Fallback for Windows (less efficient)
+            # Fallback for Windows
             try:
-                line = process.stdout.readline()
-                if line:
-                    line = line.decode('utf-8').rstrip()
-                    if line:
-                        is_stats = line.startswith('\r') or ('FPS' in line and '|' in line)
+                # Try to read available data
+                data = process.stdout.read(4096)
+                if data:
+                    lines_raw = data.decode('utf-8')
+                    lines = lines_raw.replace('\r\n', '\n').replace('\r', '\n').split('\n')
 
-                        if is_stats:
-                            stats_text = line.lstrip('\r').strip()
-                            if prefix == "DETECTION":
-                                self.last_detection_stats = stats_text
-                            else:
-                                self.last_decision_stats = stats_text
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+
+                        # Mark as connected when we receive any output
+                        if "DETECTION" in prefix and not self.detection_connected:
+                            self.detection_connected = True
                             self._update_footer()
+                        elif "DECISION" in prefix and not self.decision_connected:
+                            self.decision_connected = True
+                            self._update_footer()
+
+                        # Print message (buffer or print depending on mode)
+                        if self.buffering_mode:
+                            logger.log(line)
                         else:
-                            # Regular message - buffer or print depending on mode
-                            if self.buffering_mode:
-                                logger.log(line)
-                            else:
-                                logger.print_immediate(line)
+                            logger.print_immediate(line)
 
                         if hasattr(self, 'log_file') and self.log_file:
                             self.log_file.write(f"[{prefix}] {line}\n")
@@ -220,24 +238,14 @@ class LKASLauncher:
                 pass
 
     def _update_footer(self):
-        """Update the persistent footer with latest stats from both processes."""
+        """Update the persistent footer with connection status from both processes."""
         if not self.enable_footer:
             return
 
-        parts = []
-
-        if self.last_detection_stats:
-            parts.append(f"[Detector] {self.last_detection_stats}")
-
-        if self.last_decision_stats:
-            parts.append(f"[Controller] {self.last_decision_stats}")
-
-        if parts:
-            footer_text = " | ".join(parts)
-            self.terminal.update_footer(footer_text)
-        else:
-            # If no stats yet, show waiting message
-            self.terminal.update_footer("Waiting for stats...")
+        self.terminal.update_footer(
+            detection_connected=self.detection_connected,
+            decision_connected=self.decision_connected
+        )
 
     def run(self):
         """Start both servers and manage their lifecycle."""
@@ -246,6 +254,9 @@ class LKASLauncher:
         # Open log file
         self.log_file = open("lkas_run.log", "w", buffering=1)
         self.terminal.print("Logging output to lkas_run.log")
+
+        # Initialize footer
+        self.terminal.init_footer()
 
         # Register signal handlers for graceful shutdown
         def signal_handler(sig, frame):
@@ -263,11 +274,15 @@ class LKASLauncher:
             # Start detection server
             self.terminal.print("Starting detection server...")
             detection_cmd = self._build_detection_cmd()
+            # Set PYTHONUNBUFFERED to ensure output is not buffered
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
             self.detection_process = subprocess.Popen(
                 detection_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 bufsize=0,  # Unbuffered
+                env=env,
             )
             # Make stdout non-blocking
             if self.detection_process.stdout:
@@ -296,11 +311,15 @@ class LKASLauncher:
             # Start decision server
             self.terminal.print("Starting decision server...")
             decision_cmd = self._build_decision_cmd()
+            # Set PYTHONUNBUFFERED to ensure output is not buffered
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
             self.decision_process = subprocess.Popen(
                 decision_cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,  # Merge stderr to stdout
                 bufsize=0,  # Unbuffered
+                env=env,
             )
             # Make stdout non-blocking
             if self.decision_process.stdout:
@@ -465,6 +484,11 @@ def main():
         default="control_commands",
         help="Shared memory name for control commands (default: control_commands)",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output (FPS stats, latency info)",
+    )
 
     args = parser.parse_args()
 
@@ -476,6 +500,7 @@ def main():
         image_shm_name=args.image_shm_name,
         detection_shm_name=args.detection_shm_name,
         control_shm_name=args.control_shm_name,
+        verbose=args.verbose,
     )
 
     return launcher.run()

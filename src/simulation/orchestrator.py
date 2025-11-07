@@ -22,6 +22,9 @@ from simulation.integration.zmq_broadcast import (
     VehicleState,
 )
 from simulation.constants import SimulationConstants
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 
 @dataclass
@@ -42,6 +45,7 @@ class SimulationConfig:
     enable_latency_tracking: bool
     spawn_point: int | None = None
     control_shm_name: str = "control_commands"
+    verbose: bool = False
 
 
 class SimulationOrchestrator:
@@ -81,6 +85,10 @@ class SimulationOrchestrator:
         self.paused = False
         self.frame_count = 0
         self.timeouts = 0
+
+        # Footer
+        self.console = Console()
+        self.live_display: Optional[Live] = None
 
     def setup(self) -> bool:
         """
@@ -224,12 +232,14 @@ class SimulationOrchestrator:
     def _handle_pause(self) -> bool:
         """Handle pause action."""
         self.paused = True
+        self._update_footer()
         print("\n⏸ Paused - simulation loop will freeze")
         return True
 
     def _handle_resume(self) -> bool:
         """Handle resume action."""
         self.paused = False
+        self._update_footer()
         print("\n▶️ Resumed - simulation loop continues")
         return True
 
@@ -247,8 +257,12 @@ class SimulationOrchestrator:
         print("Press Ctrl+C to quit")
         print("=" * 60 + "\n")
 
+        # Initialize footer
+        self._init_footer()
+
         last_print = time.time()
         last_state_broadcast = time.time()
+        last_footer_update = time.time()
 
         try:
             while self.running:
@@ -260,6 +274,11 @@ class SimulationOrchestrator:
                 if self.broadcaster and time.time() - last_state_broadcast > 1.0:
                     self._broadcast_state_only()
                     last_state_broadcast = time.time()
+
+                # Update footer periodically
+                if time.time() - last_footer_update > 0.5:
+                    self._update_footer()
+                    last_footer_update = time.time()
 
                 # Check if paused
                 if self.paused:
@@ -301,8 +320,8 @@ class SimulationOrchestrator:
 
                 self.frame_count += 1
 
-                # Print status periodically
-                if self.frame_count % SimulationConstants.STATUS_PRINT_INTERVAL_FRAMES == 0:
+                # Print status periodically (only if verbose)
+                if self.config.verbose and self.frame_count % SimulationConstants.STATUS_PRINT_INTERVAL_FRAMES == 0:
                     self._print_status(last_print, detection, control)
                     last_print = time.time()
 
@@ -404,8 +423,8 @@ class SimulationOrchestrator:
             detection_info = f" | Det: {detection.processing_time_ms:.1f}ms"
 
         status_line = (
-            f"Frame {self.frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes}{detection_info} | "
-            f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.2f} | Timeouts: {self.timeouts}"
+            f"Lanes: {lanes}{detection_info} | Steering: {control.steering:+.3f} | "
+            f"Throttle: {control.throttle:.2f} | Timeouts: {self.timeouts}"
         )
 
         print(f"\r{status_line}", end="", flush=True)
@@ -419,8 +438,54 @@ class SimulationOrchestrator:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
+    def _init_footer(self):
+        """Initialize footer display."""
+        if self.live_display is None:
+            self.live_display = Live(
+                self._generate_footer(),
+                console=self.console,
+                refresh_per_second=2,
+                vertical_overflow="visible"
+            )
+            self.live_display.start()
+
+    def _generate_footer(self) -> Table:
+        """Generate footer table."""
+        table = Table.grid(padding=(0, 1))
+        table.add_column(style="cyan", no_wrap=True)
+
+        # Get broadcaster stats if available
+        broadcast_info = ""
+        if self.broadcaster and self.broadcaster.current_fps > 0:
+            stats = self.broadcaster.get_stats()
+            broadcast_info = f" [dim]|[/dim] [cyan]Broadcast: {stats['fps']:.1f} FPS, Frame {stats['frame_id']}, {stats['kb']:.1f} KB[/cyan]"
+
+        if self.paused:
+            table.add_row(f"[bold yellow]■ PAUSED[/bold yellow]{broadcast_info}")
+        else:
+            table.add_row(f"[bold green]● RUNNING[/bold green]{broadcast_info}")
+
+        return table
+
+    def _update_footer(self):
+        """Update footer display."""
+        if self.live_display is not None:
+            self.live_display.update(self._generate_footer())
+
+    def _clear_footer(self):
+        """Clear footer display."""
+        if self.live_display is not None:
+            try:
+                self.live_display.stop()
+            except Exception:
+                pass
+            finally:
+                self.live_display = None
+                print()
+
     def cleanup(self):
         """Cleanup all resources."""
+        self._clear_footer()
         print("\nCleaning up...")
 
         # Cleanup LKAS

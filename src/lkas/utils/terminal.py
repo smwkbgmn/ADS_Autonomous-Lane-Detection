@@ -10,6 +10,9 @@ import sys
 import threading
 import time
 from typing import Optional
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 
 class TerminalDisplay:
@@ -35,14 +38,11 @@ class TerminalDisplay:
         self.lock = threading.Lock()
         self._has_footer = False
 
-        # ANSI escape codes
-        self.CLEAR_LINE = "\033[2K"
-        self.CURSOR_UP = "\033[1A"
-        self.CURSOR_DOWN = "\033[1B"
-        self.SAVE_CURSOR = "\033[s"
-        self.RESTORE_CURSOR = "\033[u"
-        self.HIDE_CURSOR = "\033[?25l"
-        self.SHOW_CURSOR = "\033[?25h"
+        # Rich console and live display
+        self.console = Console()
+        self.live_display: Optional[Live] = None
+        self.detection_connected = False
+        self.decision_connected = False
 
     def print(self, message: str, prefix: str = ""):
         """
@@ -52,46 +52,71 @@ class TerminalDisplay:
             message: Message to print
             prefix: Optional prefix (e.g., "[DETECTION]")
         """
+        # Just use regular print - Rich Live handles the footer
+        if prefix:
+            print(f"{prefix} {message}")
+        else:
+            print(message)
+
+    def init_footer(self):
+        """Initialize Rich live footer display."""
+        if not self.enable_footer or self.live_display is not None:
+            return
+
         with self.lock:
-            # Clear footer if present
-            if self._has_footer and self.enable_footer:
-                sys.stdout.write(self.CLEAR_LINE + "\r")
+            self.live_display = Live(
+                self._generate_footer_table(),
+                console=self.console,
+                refresh_per_second=2,
+                vertical_overflow="visible"
+            )
+            self.live_display.start()
 
-            # Print the actual message
-            if prefix:
-                sys.stdout.write(f"{prefix} {message}\n")
-            else:
-                sys.stdout.write(f"{message}\n")
+    def _generate_footer_table(self) -> Table:
+        """Generate footer table."""
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="cyan", no_wrap=True)
+        table.add_column(style="magenta", no_wrap=True)
 
-            # Restore footer if enabled
-            if self.enable_footer and self.footer_text:
-                sys.stdout.write(self.footer_text)
-                sys.stdout.flush()
-                self._has_footer = True
-            else:
-                sys.stdout.flush()
-                self._has_footer = False
+        # Show connection status for detector and controller
+        detector_status = (
+            "[bold green]● CONNECTED[/bold green]" if self.detection_connected
+            else "[bold dim]○ DISCONNECTED[/bold dim]"
+        )
+        controller_status = (
+            "[bold green]● CONNECTED[/bold green]" if self.decision_connected
+            else "[bold dim]○ DISCONNECTED[/bold dim]"
+        )
 
-    def update_footer(self, text: str):
+        table.add_row(
+            f"[bold cyan]Detector:[/bold cyan] {detector_status}",
+            f"[bold magenta]Controller:[/bold magenta] {controller_status}"
+        )
+
+        return table
+
+    def update_footer(self, text: str = None, detection_connected: bool = None, decision_connected: bool = None):
         """
         Update the persistent footer line.
 
         Args:
-            text: Footer text to display
+            text: Legacy text (ignored, for backward compatibility)
+            detection_connected: Connection status of detection server
+            decision_connected: Connection status of decision server
         """
+
         if not self.enable_footer:
             return
 
         with self.lock:
-            # Clear current footer if present
-            if self._has_footer:
-                sys.stdout.write(self.CLEAR_LINE + "\r")
+            # Update connection status
+            if detection_connected is not None:
+                self.detection_connected = detection_connected
+            if decision_connected is not None:
+                self.decision_connected = decision_connected
 
-            # Write new footer
-            self.footer_text = text
-            sys.stdout.write(text)
-            sys.stdout.flush()
-            self._has_footer = True
+            if self.live_display is not None:
+                self.live_display.update(self._generate_footer_table())
 
     def clear_footer(self):
         """Clear the footer line."""
@@ -99,11 +124,14 @@ class TerminalDisplay:
             return
 
         with self.lock:
-            if self._has_footer:
-                sys.stdout.write(self.CLEAR_LINE + "\r")
-                sys.stdout.flush()
-                self._has_footer = False
-            self.footer_text = ""
+            if self.live_display is not None:
+                try:
+                    self.live_display.stop()
+                except Exception:
+                    pass
+                finally:
+                    self.live_display = None
+                    print()
 
     def __enter__(self):
         """Context manager entry."""

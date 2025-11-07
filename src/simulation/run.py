@@ -115,6 +115,11 @@ def parse_arguments() -> argparse.Namespace:
         default=f"tcp://*:{CommunicationConstants.DEFAULT_ACTION_PORT}",
         help=f"ZMQ URL for receiving actions (default: tcp://*:{CommunicationConstants.DEFAULT_ACTION_PORT})",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output (lane status, steering info)",
+    )
 
     return parser.parse_args()
 
@@ -182,6 +187,7 @@ def main():
         warmup_frames=args.warmup_frames,
         enable_latency_tracking=args.latency,
         control_shm_name=args.control_shm_name,
+        verbose=args.verbose,
     )
 
     # Print banner
