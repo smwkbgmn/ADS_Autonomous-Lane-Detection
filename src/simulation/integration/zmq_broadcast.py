@@ -25,6 +25,9 @@ import cv2
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Callable
 from threading import Thread
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 
 @dataclass
@@ -55,6 +58,16 @@ class VehicleState:
     speed_kmh: float
     position: Optional[tuple] = None  # (x, y, z)
     rotation: Optional[tuple] = None  # (pitch, yaw, roll)
+    paused: Optional[bool] = None  # Simulation paused state
+
+
+@dataclass
+class ParameterUpdate:
+    """Parameter update message for real-time tuning."""
+    category: str  # 'detection' or 'decision'
+    parameter: str  # Parameter name (e.g., 'canny_low', 'kp')
+    value: float    # New parameter value
+    timestamp: float = 0.0
 
 
 class VehicleBroadcaster:
@@ -87,6 +100,9 @@ class VehicleBroadcaster:
         # Stats
         self.frame_count = 0
         self.last_print_time = time.time()
+        self.current_fps = 0.0
+        self.current_frame_id = 0
+        self.current_kb = 0.0
 
         # Give ZMQ time to establish connection (slow joiner problem)
         time.sleep(0.1)
@@ -127,10 +143,14 @@ class VehicleBroadcaster:
 
         self.frame_count += 1
 
-        # Print stats every 3 seconds
+        # Update stats every 3 seconds
         if time.time() - self.last_print_time > 3.0:
             fps = self.frame_count / (time.time() - self.last_print_time)
-            print(f"\r[Broadcaster] {fps:.1f} FPS | Frame {frame_id} | {len(buffer)/1024:.1f} KB", end="", flush=True)
+            self.current_fps = fps
+            self.current_frame_id = frame_id
+            self.current_kb = len(buffer) / 1024.0
+            # Suppress print - orchestrator will display in footer
+            # print(f"\r[Broadcaster] {fps:.1f} FPS | Frame {frame_id} | {len(buffer)/1024:.1f} KB", end="", flush=True)
             self.frame_count = 0
             self.last_print_time = time.time()
 
@@ -151,6 +171,14 @@ class VehicleBroadcaster:
             b'state',
             json.dumps(message).encode('utf-8')
         ])
+
+    def get_stats(self) -> dict:
+        """Get current broadcaster statistics."""
+        return {
+            'fps': self.current_fps,
+            'frame_id': self.current_frame_id,
+            'kb': self.current_kb
+        }
 
     def close(self):
         """Close broadcaster."""
@@ -191,8 +219,6 @@ class ViewerSubscriber:
         # High water mark
         self.socket.setsockopt(zmq.RCVHWM, 10)
 
-        print(f"✓ Viewer subscriber connected to {connect_url}")
-
         # Callbacks
         self.frame_callback: Optional[Callable] = None
         self.detection_callback: Optional[Callable] = None
@@ -206,6 +232,78 @@ class ViewerSubscriber:
         # Stats
         self.frame_count = 0
         self.last_print_time = time.time()
+        self.current_fps = 0.0
+        self.current_frame_id = 0
+        self.paused = False
+        self.state_received = False  # Track if we've received any state yet
+
+        # Rich console for footer
+        self.console = Console()
+        self.live_display: Optional[Live] = None
+
+        # Initialize footer immediately
+        self._init_footer()
+
+    def _init_footer(self):
+        """Initialize rich live footer display."""
+        if self.live_display is None:
+            # Create live display with auto-refresh
+            self.live_display = Live(
+                self._generate_footer_table(),
+                console=self.console,
+                refresh_per_second=2,
+                vertical_overflow="visible"
+            )
+            self.live_display.start()
+
+    def _generate_footer_table(self) -> Table:
+        """Generate footer display as a rich Table."""
+        table = Table.grid(padding=(0, 1))
+        table.add_column(style="cyan", no_wrap=True)
+
+        if not self.state_received:
+            # Initial state - waiting for first state from simulation
+            table.add_row(
+                f"[bold dim]○ Waiting for stream...[/bold dim]",
+            )
+        elif self.paused:
+            # Simulation is paused
+            table.add_row(
+                f"[bold yellow]■ PAUSED[/bold yellow]",
+            )
+        else:
+            # Simulation is running
+            table.add_row(
+                f"[bold green]● LIVE[/bold green] [bold cyan]{self.current_fps:.1f} FPS[/bold cyan]",
+            )
+
+        return table
+
+    def _update_footer(self, fps: float, frame_id: int):
+        """Update footer with new stats."""
+        self.current_fps = fps
+        self.current_frame_id = frame_id
+
+        if self.live_display is not None:
+            self.live_display.update(self._generate_footer_table())
+
+    def set_paused(self, paused: bool):
+        """Set pause status and update footer immediately."""
+        self.paused = paused
+        if self.live_display is not None:
+            self.live_display.update(self._generate_footer_table())
+
+    def _clear_footer(self):
+        """Stop and clear the footer display."""
+        if self.live_display is not None:
+            try:
+                self.live_display.stop()
+            except Exception:
+                pass
+            finally:
+                self.live_display = None
+                # Print newline to ensure clean terminal state
+                print()
 
     def register_frame_callback(self, callback: Callable[[np.ndarray, Dict], None]):
         """Register callback for frame updates."""
@@ -244,11 +342,14 @@ class ViewerSubscriber:
                 self.latest_frame = image_rgb
                 self.frame_count += 1
 
-                # Print stats
-                if time.time() - self.last_print_time > 3.0:
-                    fps = self.frame_count / (time.time() - self.last_print_time)
-                    print(f"[Subscriber] Receiving {fps:.1f} FPS | Frame {metadata['frame_id']}", end='\r', flush=True)
-                    print('\n')
+                # Update footer stats
+                if time.time() - self.last_print_time > 0.5:  # Update every 500ms
+                    elapsed = time.time() - self.last_print_time
+                    fps = self.frame_count / elapsed
+
+                    # Update footer with new stats
+                    self._update_footer(fps, metadata['frame_id'])
+
                     self.frame_count = 0
                     self.last_print_time = time.time()
 
@@ -268,6 +369,11 @@ class ViewerSubscriber:
                 data = json.loads(parts[1].decode('utf-8'))
                 state = VehicleState(**data)
                 self.latest_state = state
+                self.state_received = True
+
+                # Update pause state from vehicle if provided
+                if state.paused is not None and state.paused != self.paused:
+                    self.set_paused(state.paused)
 
                 if self.state_callback:
                     self.state_callback(state)
@@ -278,7 +384,7 @@ class ViewerSubscriber:
             # No message available
             return False
         except Exception as e:
-            print(f"⚠ Error receiving message: {e}")
+            # print(f"⚠ Error receiving message: {e}")
             return False
 
     def run_loop(self):
@@ -290,9 +396,19 @@ class ViewerSubscriber:
                 time.sleep(0.001)  # Small sleep to prevent busy-wait
         except KeyboardInterrupt:
             print("\nStopping subscriber...")
+        finally:
+            self._clear_footer()
 
     def close(self):
         """Close subscriber."""
+        # Ensure footer is cleared before closing
+        if self.live_display is not None:
+            try:
+                self.live_display.stop()
+                self.live_display = None
+            except Exception:
+                pass
+
         self.socket.close()
         self.context.term()
         print("✓ Viewer subscriber stopped")
@@ -319,8 +435,6 @@ class ActionPublisher:
         # Give ZMQ time to establish
         time.sleep(0.1)
 
-        print(f"✓ Action publisher connected to {connect_url}")
-
     def send_action(self, action: str, params: Optional[Dict[str, Any]] = None):
         """
         Send action command.
@@ -340,8 +454,6 @@ class ActionPublisher:
             json.dumps(message).encode('utf-8')
         ])
 
-        print(f"[Action] Sent: {action}")
-
     def close(self):
         """Close publisher."""
         self.socket.close()
@@ -352,18 +464,34 @@ class ActionSubscriber:
     """
     Subscriber: Receives actions on vehicle/simulation.
 
-    Runs on vehicle. Receives commands from web viewer.
+    Runs on vehicle. Receives commands from web viewer or LKAS broker.
     """
 
-    def __init__(self, bind_url: str = "tcp://*:5558"):
-        """Initialize action subscriber."""
+    def __init__(self, bind_url: str = "tcp://*:5558", connect_mode: bool = False):
+        """
+        Initialize action subscriber.
+
+        Args:
+            bind_url: ZMQ URL to bind/connect to
+            connect_mode: If True, connect as client (receive from LKAS broker).
+                         If False, bind as server (old architecture, for backward compatibility).
+        """
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.SUB)
-        self.socket.bind(bind_url)
+
+        if connect_mode:
+            # Connect to LKAS broker (new architecture)
+            # Convert tcp://*:5558 to tcp://localhost:5561 (LKAS action forward port)
+            connect_url = "tcp://localhost:5561"  # LKAS broker forwards to this port
+            self.socket.connect(connect_url)
+            print(f"✓ Action subscriber connected to {connect_url}")
+        else:
+            # Bind as server (old architecture, for backward compatibility)
+            self.socket.bind(bind_url)
+            print(f"✓ Action subscriber listening on {bind_url}")
+
         self.socket.setsockopt(zmq.SUBSCRIBE, b'action')
         self.socket.setsockopt(zmq.RCVTIMEO, 100)
-
-        print(f"✓ Action subscriber listening on {bind_url}")
 
         # Callbacks
         self.action_callbacks: Dict[str, Callable] = {}
@@ -384,25 +512,238 @@ class ActionSubscriber:
                 action = data['action']
                 params = data.get('params', {})
 
-                print(f"[Action] Received: {action}")
-
                 if action in self.action_callbacks:
-                    self.action_callbacks[action](**params)
+                    result = self.action_callbacks[action](**params)
                 else:
-                    print(f"  ⚠ Unknown action: {action}")
+                    print(f"[ActionSubscriber] ⚠ Unknown action: {action}")
+                    print(f"[ActionSubscriber] Available actions: {list(self.action_callbacks.keys())}")
 
             return True
 
         except zmq.Again:
             return False
+
         except Exception as e:
-            print(f"⚠ Error receiving action: {e}")
+            print(f"[ActionSubscriber] ⚠ Error receiving action: {e}")
+
+            import traceback
+            traceback.print_exc()
             return False
 
     def close(self):
         """Close subscriber."""
         self.socket.close()
         self.context.term()
+
+
+class ParameterPublisher:
+    """
+    Publisher: Sends parameter updates from viewer to vehicle/simulation.
+
+    Runs in viewer process. Publishes real-time parameter adjustments.
+    """
+
+    def __init__(self, bind_url: str = "tcp://*:5559", connect_mode: bool = False):
+        """
+        Initialize parameter publisher.
+
+        Args:
+            bind_url: ZMQ URL to bind/connect to
+            connect_mode: If True, connect as client. If False, bind as server (default)
+                         Use connect_mode=True when LKAS broker is running (new architecture)
+        """
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.PUB)
+
+        if connect_mode:
+            # Connect to LKAS broker (new architecture)
+            # Convert tcp://*:5559 to tcp://localhost:5559 for connect
+            connect_url = bind_url.replace("tcp://*:", "tcp://localhost:")
+            self.socket.connect(connect_url)
+        else:
+            # Bind as server (old architecture, for backward compatibility)
+            self.socket.bind(bind_url)
+
+        # Give ZMQ time to establish
+        time.sleep(0.1)
+
+    def send_parameter(self, category: str, parameter: str, value: float):
+        """
+        Send parameter update.
+
+        Args:
+            category: 'detection' or 'decision'
+            parameter: Parameter name
+            value: New value
+        """
+        try:
+            if self.socket.closed:
+                return
+
+            update = ParameterUpdate(
+                category=category,
+                parameter=parameter,
+                value=value,
+                timestamp=time.time()
+            )
+
+            message = asdict(update)
+
+            self.socket.send_multipart([
+                b'parameter',
+                json.dumps(message).encode('utf-8')
+            ], flags=zmq.NOBLOCK)
+        except zmq.error.Again:
+            # Socket is full, skip this message
+            pass
+        except Exception as e:
+            # Don't crash on send errors
+            print(f"[ParameterPublisher] Error sending parameter: {e}")
+
+    def close(self):
+        """Close publisher."""
+        try:
+            if not self.socket.closed:
+                self.socket.setsockopt(zmq.LINGER, 0)
+                self.socket.close()
+            self.context.term()
+        except:
+            pass
+
+
+class ParameterSubscriber:
+    """
+    Subscriber: Receives parameter updates in detection/decision servers.
+
+    Runs in detection and decision servers. Applies parameter changes in real-time.
+    """
+
+    def __init__(self, connect_url: str = "tcp://localhost:5559"):
+        """
+        Initialize parameter subscriber.
+
+        Args:
+            connect_url: ZMQ URL to connect to parameter broker
+        """
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.SUB)
+        self.socket.connect(connect_url)
+        self.socket.setsockopt(zmq.SUBSCRIBE, b'parameter')
+        self.socket.setsockopt(zmq.RCVTIMEO, 10)  # 10ms timeout for non-blocking
+
+        print(f"✓ Parameter subscriber connected to {connect_url}")
+
+        # Callbacks for different categories
+        self.parameter_callbacks: Dict[str, Callable[[str, float], None]] = {}
+
+    def register_callback(self, category: str, callback: Callable[[str, float], None]):
+        """
+        Register callback for parameter updates.
+
+        Args:
+            category: Category to listen for ('detection' or 'decision')
+            callback: Function(parameter_name, value) to handle updates
+        """
+        self.parameter_callbacks[category] = callback
+        print(f"  Registered parameter callback for: {category}")
+
+    def poll(self) -> bool:
+        """
+        Poll for parameter updates (non-blocking).
+
+        Returns:
+            True if received update, False otherwise
+        """
+        try:
+            parts = self.socket.recv_multipart(zmq.NOBLOCK)
+            topic = parts[0].decode('utf-8')
+            data = json.loads(parts[1].decode('utf-8'))
+
+            if topic == 'parameter':
+                update = ParameterUpdate(**data)
+
+                # Call registered callback for this category
+                if update.category in self.parameter_callbacks:
+                    self.parameter_callbacks[update.category](
+                        update.parameter,
+                        update.value
+                    )
+                    return True
+
+            return False
+
+        except zmq.Again:
+            # No message available
+            return False
+        except Exception as e:
+            # print(f"⚠ Error receiving parameter: {e}")
+            return False
+
+    def close(self):
+        """Close subscriber."""
+        self.socket.close()
+        self.context.term()
+
+
+class VehicleStatusPublisher:
+    """
+    Publisher: Sends vehicle status TO the LKAS broker.
+
+    Runs in simulation/orchestrator. Sends vehicle state to LKAS broker
+    which then broadcasts to all viewers.
+    """
+
+    def __init__(self, lkas_broker_url: str = "tcp://localhost:5562"):
+        """
+        Initialize vehicle status publisher.
+
+        Args:
+            lkas_broker_url: URL to send vehicle status to LKAS broker
+        """
+        self.context = zmq.Context()
+
+        # Publisher socket (connects to LKAS broker's subscriber)
+        self.pub_socket = self.context.socket(zmq.PUB)
+        self.pub_socket.connect(lkas_broker_url)
+        self.pub_socket.setsockopt(zmq.LINGER, 0)  # Don't block on close
+        self.pub_socket.setsockopt(zmq.SNDHWM, 10)  # High water mark
+
+        time.sleep(0.1)  # Let socket establish
+
+        print(f"✓ Vehicle status publisher connected to LKAS broker: {lkas_broker_url}")
+
+    def send_state(self, state: VehicleState):
+        """
+        Send vehicle state to LKAS broker.
+
+        Args:
+            state: Vehicle state data
+        """
+        try:
+            if self.pub_socket.closed:
+                return
+
+            message = asdict(state)
+
+            # Send multipart: [topic, json_data]
+            self.pub_socket.send_multipart([
+                b'vehicle_status',
+                json.dumps(message).encode('utf-8')
+            ], flags=zmq.NOBLOCK)
+
+        except zmq.Again:
+            # Socket full, skip message (prefer real-time over buffering)
+            pass
+        except Exception as e:
+            # Silently ignore send errors (broker might not be ready yet)
+            pass
+
+    def close(self):
+        """Close publisher."""
+        if self.pub_socket:
+            self.pub_socket.close()
+        if self.context:
+            self.context.term()
 
 
 # Example usage

@@ -5,7 +5,7 @@ SINGLE RESPONSIBILITY: Log performance data and provide statistics.
 """
 
 import time
-from detection.core.models import LaneMetrics
+from lkas.detection.core.models import LaneMetrics
 
 
 class MetricsLogger:

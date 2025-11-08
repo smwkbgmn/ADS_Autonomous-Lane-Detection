@@ -11,21 +11,19 @@ import sys
 from typing import Optional, Callable
 from dataclasses import dataclass
 
-from detection.core.config import ConfigManager
+from lkas.detection.core.config import ConfigManager
 from simulation import CARLAConnection, VehicleManager, CameraSensor
-from decision import DecisionController
-from simulation.integration.messages import ControlMessage, ControlMode
+from lkas import LKAS
+from lkas.integration.messages import ControlMessage, ControlMode
 from simulation.integration.zmq_broadcast import (
-    VehicleBroadcaster,
+    VehicleStatusPublisher,
     ActionSubscriber,
-    DetectionData,
     VehicleState,
 )
-from simulation.integration.shared_memory_detection import (
-    SharedMemoryImageChannel,
-    SharedMemoryDetectionClient,
-)
-from core.constants import SimulationConstants
+from simulation.constants import SimulationConstants
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
 
 
 @dataclass
@@ -33,7 +31,6 @@ class SimulationConfig:
     """Configuration for simulation orchestrator."""
     carla_host: str
     carla_port: int
-    spawn_point: Optional[int]
     image_shm_name: str
     detection_shm_name: str
     detector_timeout: int
@@ -45,6 +42,9 @@ class SimulationConfig:
     base_throttle: float
     warmup_frames: int
     enable_latency_tracking: bool
+    spawn_point: int | None = None
+    control_shm_name: str = "control_commands"
+    verbose: bool = False
 
 
 class SimulationOrchestrator:
@@ -59,7 +59,7 @@ class SimulationOrchestrator:
     This class is testable by injecting dependencies.
     """
 
-    def __init__(self, config: SimulationConfig, system_config: object):
+    def __init__(self, config: SimulationConfig, system_config: object, verbose: bool = False):
         """
         Initialize orchestrator.
 
@@ -71,20 +71,23 @@ class SimulationOrchestrator:
         self.system_config = system_config
 
         # Subsystems (initialized in setup methods)
-        self.carla_conn: Optional[CARLAConnection] = None
-        self.vehicle_mgr: Optional[VehicleManager] = None
-        self.camera: Optional[CameraSensor] = None
-        self.image_writer: Optional[SharedMemoryImageChannel] = None
-        self.detector: Optional[SharedMemoryDetectionClient] = None
-        self.controller: Optional[DecisionController] = None
-        self.broadcaster: Optional[VehicleBroadcaster] = None
-        self.action_subscriber: Optional[ActionSubscriber] = None
+        self.carla_conn: CARLAConnection | None = None
+        self.vehicle_mgr: VehicleManager | None = None
+        self.camera: CameraSensor | None = None
+        # LKAS system (detection + decision)
+        self.lkas: LKAS | None = None
+        self.status_publisher: VehicleStatusPublisher | None = None
+        self.action_subscriber: ActionSubscriber | None = None
 
         # State
         self.running = False
         self.paused = False
         self.frame_count = 0
         self.timeouts = 0
+
+        # Footer
+        self.console = Console()
+        self.live_display: Optional[Live] = None
 
     def setup(self) -> bool:
         """
@@ -102,13 +105,10 @@ class SimulationOrchestrator:
         if not self._setup_camera():
             return False
 
-        if not self._setup_detection():
-            return False
+        self._setup_lkas()
 
-        self._setup_controller()
-
-        if self.config.enable_broadcast:
-            self._setup_broadcasting()
+        # Setup ZMQ communication with LKAS broker
+        self._setup_zmq_communication()
 
         self._setup_event_handlers()
 
@@ -163,74 +163,68 @@ class SimulationOrchestrator:
             rotation=self.system_config.camera.rotation,
         )
 
-    def _setup_detection(self) -> bool:
-        """Setup detection communication."""
-        print("\n[4/5] Setting up detection communication...")
+    def _setup_lkas(self):
+        """Setup LKAS (Lane Keeping Assist System)."""
+        print("\n[4/5] Setting up LKAS...")
+        print("Mode: External (via LKAS servers)")
 
         try:
-            print("Setting up shared memory communication...")
-            print("(Both processes can start in any order - will retry if needed)")
+            print("(All processes can start in any order - will retry if needed)")
 
-            # Create image writer
-            print("\nCreating shared memory image writer...")
-            self.image_writer = SharedMemoryImageChannel(
-                name=self.config.image_shm_name,
-                shape=(
+            self.lkas = LKAS(
+                image_shm_name=self.config.image_shm_name,
+                detection_shm_name=self.config.detection_shm_name,
+                control_shm_name=self.config.control_shm_name,
+                image_shape=(
                     self.system_config.camera.height,
                     self.system_config.camera.width,
                     3
                 ),
-                create=True,
                 retry_count=SimulationConstants.DEFAULT_RETRY_COUNT,
                 retry_delay=SimulationConstants.RETRY_DELAY_SECONDS
             )
 
-            # Connect to detection results
-            print("\nConnecting to detection results...")
-            self.detector = SharedMemoryDetectionClient(
-                detection_shm_name=self.config.detection_shm_name,
-                retry_count=SimulationConstants.DEFAULT_RETRY_COUNT,
-                retry_delay=SimulationConstants.RETRY_DELAY_SECONDS
-            )
-
-            print("\n✓ Shared memory communication ready")
-            return True
+            print(f"✓ LKAS client ready")
+            print(f"  Image: {self.config.image_shm_name}")
+            print(f"  Detection: {self.config.detection_shm_name}")
+            print(f"  Control: {self.config.control_shm_name}")
 
         except Exception as e:
-            print(f"\n✗ Failed to setup shared memory: {e}")
-            print(f"  Tip: Make sure detection server is running")
-            print(f"       Both processes can start in any order, but both must be running.")
-            return False
+            print(f"✗ Failed to setup LKAS: {e}")
+            print(f"  Tip: Make sure detection and decision servers are running")
+            raise
 
-    def _setup_controller(self):
-        """Setup decision controller."""
-        print("\n[5/5] Setting up controller...")
+    def _setup_zmq_communication(self):
+        """Setup ZMQ communication with LKAS broker."""
+        try:
+            print("\n[5/5] Setting up ZMQ communication with LKAS broker...")
 
-        throttle_policy = {
-            "base": self.system_config.throttle_policy.base,
-            "min": self.system_config.throttle_policy.min,
-            "steer_threshold": self.system_config.throttle_policy.steer_threshold,
-            "steer_max": self.system_config.throttle_policy.steer_max,
-        }
+            # Setup vehicle status publisher (sends status TO LKAS broker)
+            try:
+                self.status_publisher = VehicleStatusPublisher(lkas_broker_url="tcp://localhost:5562")
+                print(f"✓ Vehicle status publisher connected to LKAS broker")
+            except Exception as e:
+                print(f"⚠ Failed to connect status publisher: {e}")
+                print(f"  Simulation will run but viewer won't see vehicle status")
+                self.status_publisher = None
 
-        self.controller = DecisionController(
-            image_width=self.system_config.camera.width,
-            image_height=self.system_config.camera.height,
-            kp=self.system_config.controller.kp,
-            kd=self.system_config.controller.kd,
-            throttle_policy=throttle_policy,
-        )
+            # Setup action subscriber (receives actions FROM LKAS broker)
+            try:
+                self.action_subscriber = ActionSubscriber(
+                    bind_url=self.config.action_url,
+                    connect_mode=True  # Connect to LKAS broker (port 5561)
+                )
+                print(f"✓ Action subscriber connected to LKAS broker")
+            except Exception as e:
+                print(f"⚠ Failed to connect action subscriber: {e}")
+                print(f"  Actions (pause/resume/respawn) will be disabled")
+                self.action_subscriber = None
 
-        print(f"✓ Controller ready")
-        print(f"  Adaptive throttle: base={self.system_config.throttle_policy.base}, "
-              f"min={self.system_config.throttle_policy.min}")
-
-    def _setup_broadcasting(self):
-        """Setup ZMQ broadcasting for remote viewer."""
-        print("\nInitializing ZMQ broadcaster for remote viewer...")
-        self.broadcaster = VehicleBroadcaster(bind_url=self.config.broadcast_url)
-        self.action_subscriber = ActionSubscriber(bind_url=self.config.action_url)
-        print("✓ ZMQ broadcaster ready")
+            print("✓ ZMQ communication setup complete")
+        except Exception as e:
+            print(f"✗ Failed to setup ZMQ communication: {e}")
+            self.status_publisher = None
+            self.action_subscriber = None
 
     def _setup_event_handlers(self):
         """Setup event handlers for actions."""
@@ -247,10 +241,11 @@ class SimulationOrchestrator:
 
     def _handle_respawn(self) -> bool:
         """Handle respawn action."""
-        print("\n🔄 Respawn requested")
+        if self.config.verbose:
+            print(f"\n🔄 Respawn requested")
+
         try:
             if self.vehicle_mgr.teleport_to_spawn_point(self.config.spawn_point):
-                print("✓ Vehicle respawned successfully")
                 return True
             else:
                 print("✗ Failed to respawn vehicle")
@@ -262,13 +257,19 @@ class SimulationOrchestrator:
     def _handle_pause(self) -> bool:
         """Handle pause action."""
         self.paused = True
-        print("\n⏸ Paused - simulation loop will freeze")
+        self._update_footer()
+
+        if self.config.verbose:
+            print("\n⏸ Paused - simulation loop will freeze")
         return True
 
     def _handle_resume(self) -> bool:
         """Handle resume action."""
         self.paused = False
-        print("\n▶️ Resumed - simulation loop continues")
+        self._update_footer()
+
+        if self.config.verbose:
+            print("\n▶️ Resumed - simulation loop continues")
         return True
 
     def run(self):
@@ -285,13 +286,28 @@ class SimulationOrchestrator:
         print("Press Ctrl+C to quit")
         print("=" * 60 + "\n")
 
+        # Initialize footer
+        self._init_footer()
+
         last_print = time.time()
+        last_state_broadcast = time.time()
+        last_footer_update = time.time()
 
         try:
             while self.running:
                 # Poll for actions
                 if self.action_subscriber:
                     self.action_subscriber.poll()
+
+                # Send vehicle status periodically (even when paused)
+                if self.status_publisher and time.time() - last_state_broadcast > 1.0:
+                    self._send_vehicle_status()
+                    last_state_broadcast = time.time()
+
+                # Update footer periodically
+                if time.time() - last_footer_update > 0.5:
+                    self._update_footer()
+                    last_footer_update = time.time()
 
                 # Check if paused
                 if self.paused:
@@ -305,16 +321,20 @@ class SimulationOrchestrator:
                 # Get image from camera
                 image = self.camera.get_latest_image()
                 if image is None:
+                    if self.config.verbose:
+                        print("No image received yet, skipping frame...")
                     continue
 
-                # Send to detector and get result
-                self.image_writer.write(image, timestamp=time.time(), frame_id=self.frame_count)
-                detection = self.detector.get_detection(
+                # Send image to LKAS
+                self.lkas.send_image(image, timestamp=time.time(), frame_id=self.frame_count)
+
+                # Get detection from LKAS
+                detection = self.lkas.get_detection(
                     timeout=self.config.detector_timeout / 1000.0
                 )
 
-                # Process detection and compute control
-                control = self._process_detection(detection)
+                # Get control from LKAS
+                control = self._get_control(detection)
 
                 # Apply control
                 if not self.vehicle_mgr.is_autopilot_enabled():
@@ -324,14 +344,15 @@ class SimulationOrchestrator:
                         control.brake
                     )
 
-                # Broadcast to remote viewers
-                if self.broadcaster:
-                    self._broadcast_data(image, detection, control)
+                # Send vehicle status to LKAS broker (which broadcasts to viewers)
+                # Note: Frames and detection are sent by LKAS directly
+                if self.status_publisher:
+                    self._send_vehicle_status(control)
 
                 self.frame_count += 1
 
-                # Print status periodically
-                if self.frame_count % SimulationConstants.STATUS_PRINT_INTERVAL_FRAMES == 0:
+                # Print status periodically (only if verbose)
+                if self.config.verbose and self.frame_count % SimulationConstants.STATUS_PRINT_INTERVAL_FRAMES == 0:
                     self._print_status(last_print, detection, control)
                     last_print = time.time()
 
@@ -340,66 +361,52 @@ class SimulationOrchestrator:
         finally:
             self.cleanup()
 
-    def _process_detection(self, detection):
-        """Process detection result and compute control."""
-        # Check if we have valid detection
-        has_valid_detection = detection is not None and (
-            detection.left_lane is not None or detection.right_lane is not None
-        )
+    def _get_control(self, detection):
+        """Get control from LKAS decision server."""
+        control = self.lkas.get_control()
 
-        if not has_valid_detection:
+        if control is None:
+            # No control received, use safe defaults
+            if self.config.verbose:
+                print("\n⚠️ Control timeout, applying safe defaults")
             self.timeouts += 1
-            # No detection: use base throttle to keep moving
             return ControlMessage(
                 steering=0.0,
                 throttle=self.config.base_throttle,
                 brake=0.0,
                 mode=ControlMode.LANE_KEEPING,
             )
-        else:
-            # Valid detection: use controller
-            return self.controller.process_detection(detection)
 
-    def _broadcast_data(self, image, detection, control):
-        """Broadcast data to remote viewers."""
-        # Send image
-        self.broadcaster.send_frame(image, self.frame_count)
+        return control
 
-        # Send detection
-        if detection:
-            detection_data = DetectionData(
-                left_lane={
-                    'x1': float(detection.left_lane.x1),
-                    'y1': float(detection.left_lane.y1),
-                    'x2': float(detection.left_lane.x2),
-                    'y2': float(detection.left_lane.y2),
-                    'confidence': float(detection.left_lane.confidence)
-                } if detection.left_lane else None,
-                right_lane={
-                    'x1': float(detection.right_lane.x1),
-                    'y1': float(detection.right_lane.y1),
-                    'x2': float(detection.right_lane.x2),
-                    'y2': float(detection.right_lane.y2),
-                    'confidence': float(detection.right_lane.confidence)
-                } if detection.right_lane else None,
-                processing_time_ms=detection.processing_time_ms if hasattr(detection, 'processing_time_ms') else 0.0,
-                frame_id=self.frame_count
-            )
-            self.broadcaster.send_detection(detection_data)
+    def _send_vehicle_status(self, control=None):
+        """
+        Send vehicle status to LKAS broker.
 
-        # Send vehicle state
+        Args:
+            control: Control command (optional, may be None when paused)
+        """
         velocity = self.vehicle_mgr.get_velocity()
         speed_ms = (velocity.x**2 + velocity.y**2 + velocity.z**2)**0.5 if velocity else 0.0
 
+        # Get vehicle transform
+        transform = self.vehicle_mgr.get_vehicle().get_transform()
+        location = transform.location
+        rotation = transform.rotation
+
+        # Create vehicle state message
         vehicle_state = VehicleState(
-            steering=float(control.steering),
-            throttle=float(control.throttle),
-            brake=float(control.brake),
+            steering=float(control.steering) if control else 0.0,
+            throttle=float(control.throttle) if control else 0.0,
+            brake=float(control.brake) if control else 0.0,
             speed_kmh=float(speed_ms * 3.6),
-            position=None,
-            rotation=None
+            position=(location.x, location.y, location.z),
+            rotation=(rotation.pitch, rotation.yaw, rotation.roll),
+            paused=self.paused
         )
-        self.broadcaster.send_state(vehicle_state)
+
+        # Send to LKAS broker (which will broadcast to all viewers)
+        self.status_publisher.send_state(vehicle_state)
 
     def _print_status(self, last_print, detection, control):
         """Print status line."""
@@ -417,8 +424,8 @@ class SimulationOrchestrator:
             detection_info = f" | Det: {detection.processing_time_ms:.1f}ms"
 
         status_line = (
-            f"Frame {self.frame_count:5d} | FPS: {fps:5.1f} | Lanes: {lanes}{detection_info} | "
-            f"Steering: {control.steering:+.3f} | Throttle: {control.throttle:.2f} | Timeouts: {self.timeouts}"
+            f"Lanes: {lanes}{detection_info} | Steering: {control.steering:+.3f} | "
+            f"Throttle: {control.throttle:.2f} | Timeouts: {self.timeouts}"
         )
 
         print(f"\r{status_line}", end="", flush=True)
@@ -432,16 +439,61 @@ class SimulationOrchestrator:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
+    def _init_footer(self):
+        """Initialize footer display."""
+        if self.live_display is None:
+            self.live_display = Live(
+                self._generate_footer(),
+                console=self.console,
+                refresh_per_second=2,
+                vertical_overflow="visible"
+            )
+            self.live_display.start()
+
+    def _generate_footer(self) -> Table:
+        """Generate footer table."""
+        table = Table.grid(padding=(0, 1))
+        table.add_column(style="cyan", no_wrap=True)
+
+        # Show pause/running status
+        if self.paused:
+            table.add_row(f"[bold yellow]■ PAUSED[/bold yellow]")
+        else:
+            table.add_row(f"[bold green]● RUNNING[/bold green]")
+
+        return table
+
+    def _update_footer(self):
+        """Update footer display."""
+        if self.live_display is not None:
+            self.live_display.update(self._generate_footer())
+
+    def _clear_footer(self):
+        """Clear footer display."""
+        if self.live_display is not None:
+            try:
+                self.live_display.stop()
+            except Exception:
+                pass
+            finally:
+                self.live_display = None
+                print()
+
     def cleanup(self):
         """Cleanup all resources."""
+        self._clear_footer()
         print("\nCleaning up...")
 
-        if self.detector:
-            self.detector.close()
+        # Cleanup ZMQ communication
+        if self.status_publisher:
+            self.status_publisher.close()
 
-        if self.image_writer:
-            self.image_writer.close()
-            self.image_writer.unlink()
+        if self.action_subscriber:
+            self.action_subscriber.close()
+
+        # Cleanup LKAS (just close, don't unlink - LKAS servers own the memory)
+        if self.lkas:
+            self.lkas.close()
 
         if self.camera:
             self.camera.destroy_camera()

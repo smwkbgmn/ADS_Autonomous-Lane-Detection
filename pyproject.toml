@@ -86,14 +86,18 @@ all = ["seame-ads[dev,train]"]
 
 # Entry points for command-line scripts
 [project.scripts]
-lane-detection = "detection.run:main"
+lkas = "lkas.run:main"
+detection-server = "lkas.detection.run:main"
+decision-server = "lkas.decision.run:main"
 simulation = "simulation.run:main"
 viewer = "viewer.run:main"
 
 # Package discovery (src-layout)
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["detection", "simulation", "decision", "viewer"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml", "*.json"]

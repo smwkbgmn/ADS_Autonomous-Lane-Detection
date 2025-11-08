@@ -25,9 +25,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from simulation.integration.zmq_broadcast import ViewerSubscriber, ActionPublisher, DetectionData, VehicleState
+from simulation.integration.zmq_broadcast import ViewerSubscriber, ActionPublisher, DetectionData, VehicleState, ParameterPublisher
 from simulation.utils.visualizer import LKASVisualizer
-from simulation.utils.lane_analyzer import LaneDepartureStatus
+from lkas.detection.core.models import LaneDepartureStatus
 
 
 class ZMQWebViewer:
@@ -40,22 +40,36 @@ class ZMQWebViewer:
     def __init__(self,
                  vehicle_url: str = "tcp://localhost:5557",
                  action_url: str = "tcp://localhost:5558",
-                 web_port: int = 8080):
+                 parameter_bind_url: str = "tcp://*:5559",
+                 web_port: int = 8080,
+                 verbose: bool = False,
+                 lkas_mode: bool = True):
         """
         Initialize ZMQ web viewer.
 
         Args:
             vehicle_url: ZMQ URL to receive data from vehicle
             action_url: ZMQ URL to send actions to vehicle
+            parameter_bind_url: ZMQ URL to bind/connect for parameter updates
             web_port: HTTP port for web interface
+            verbose: Enable verbose HTTP request logging
+            lkas_mode: If True, connect to LKAS broker (default, new architecture).
+                      If False, bind as server for simulation (old architecture).
         """
         self.vehicle_url = vehicle_url
         self.action_url = action_url
+        self.parameter_bind_url = parameter_bind_url
         self.web_port = web_port
+        self.verbose = verbose
+        self.lkas_mode = lkas_mode
 
         # ZMQ communication
         self.subscriber = ViewerSubscriber(vehicle_url)
         self.action_publisher = ActionPublisher(action_url)
+        self.parameter_publisher = ParameterPublisher(
+            bind_url=parameter_bind_url,
+            connect_mode=lkas_mode  # Connect to LKAS broker in new architecture
+        )
 
         # Visualization
         self.visualizer = LKASVisualizer()
@@ -79,7 +93,8 @@ class ZMQWebViewer:
         print("ZMQ Web Viewer - Laptop Side")
         print(f"{'='*60}")
         print(f"  Receiving from: {vehicle_url}")
-        print(f"  Sending to: {action_url}")
+        print(f"  Sending actions to: {action_url}")
+        print(f"  Parameter server: {parameter_bind_url} ({'connect' if lkas_mode else 'bind'} mode)")
         print(f"  Web interface: http://localhost:{web_port}")
         print(f"{'='*60}\n")
 
@@ -206,11 +221,38 @@ class ZMQWebViewer:
 
         class ViewerRequestHandler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                # Suppress HTTP logs
-                pass
+                # Custom logging based on verbose flag
+                if viewer_self.verbose:
+                    # Verbose mode: log all requests with details
+                    message = format % args
+                    print(f"[HTTP] {message}")
+                else:
+                    # Normal mode: log important messages only
+                    message = format % args
+                    if "code 404" in message or "code 500" in message or "error" in message.lower():
+                        print(f"[HTTP] {message}")
+                    # Suppress routine logs (200, 204)
+
+            def log_request(self, code='-', size='-'):
+                """Log an HTTP request with detailed information in verbose mode."""
+                if viewer_self.verbose:
+                    # Extract client info
+                    client_ip = self.client_address[0]
+                    client_port = self.client_address[1]
+
+                    # Get request details
+                    method = self.command
+                    path = self.path
+                    protocol = self.request_version
+
+                    # Format log message
+                    print(f"[HTTP] {method} {path} {protocol} - Client: {client_ip}:{client_port} - Status: {code} - Size: {size}")
+                else:
+                    # Use default logging (will be filtered by log_message)
+                    super().log_request(code, size)
 
             def do_POST(self):
-                """Handle POST requests for actions."""
+                """Handle POST requests for actions and parameters."""
                 if self.path == '/action':
                     try:
                         content_length = int(self.headers['Content-Length'])
@@ -218,9 +260,8 @@ class ZMQWebViewer:
                         data = json.loads(post_data.decode('utf-8'))
                         action = data.get('action')
 
-                        print(f"[Action] Browser requested: {action}")
-
                         # Send action to vehicle via ZMQ
+                        # The viewer will update its footer when it receives the state update from simulation
                         viewer_self.action_publisher.send_action(action)
 
                         # Send success response
@@ -237,6 +278,40 @@ class ZMQWebViewer:
                         self.end_headers()
                         response = json.dumps({'status': 'error', 'message': str(e)})
                         self.wfile.write(response.encode())
+
+                elif self.path == '/parameter':
+                    try:
+                        content_length = int(self.headers['Content-Length'])
+                        post_data = self.rfile.read(content_length)
+                        data = json.loads(post_data.decode('utf-8'))
+
+                        category = data.get('category')  # 'detection' or 'decision'
+                        parameter = data.get('parameter')
+                        value = float(data.get('value'))
+
+                        # Send parameter update via ZMQ
+                        viewer_self.parameter_publisher.send_parameter(category, parameter, value)
+
+                        # Send success response
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        response = json.dumps({
+                            'status': 'ok',
+                            'category': category,
+                            'parameter': parameter,
+                            'value': value
+                        })
+                        self.wfile.write(response.encode())
+
+                    except Exception as e:
+                        print(f"[Parameter] Error: {e}")
+                        self.send_response(500)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        response = json.dumps({'status': 'error', 'message': str(e)})
+                        self.wfile.write(response.encode())
+
                 else:
                     self.send_error(404)
 
@@ -257,12 +332,15 @@ class ZMQWebViewer:
                     self.send_header('Pragma', 'no-cache')
                     self.end_headers()
 
+                    frame_count = 0
                     try:
                         while viewer_self.running:
                             if viewer_self.rendered_frame is not None:
-                                # Encode frame as JPEG
+                                frame_count += 1
+
+                                # Encode frame as JPEG with high quality
                                 success, buffer = cv2.imencode('.jpg', viewer_self.rendered_frame,
-                                                               [cv2.IMWRITE_JPEG_QUALITY, 85])
+                                                               [cv2.IMWRITE_JPEG_QUALITY, 95])
                                 if success:
                                     frame_bytes = buffer.tobytes()
 
@@ -272,225 +350,83 @@ class ZMQWebViewer:
                                     self.wfile.write(f'Content-Length: {len(frame_bytes)}\r\n\r\n'.encode())
                                     self.wfile.write(frame_bytes)
                                     self.wfile.write(b'\r\n')
+                                else:
+                                    print(f"[HTTP] Failed to encode frame!")
+                            else:
+                                if frame_count == 0:
+                                    time.sleep(1)
+                                    continue
 
                             time.sleep(0.033)  # ~30 FPS
                     except Exception as e:
                         print(f"[HTTP] Stream ended: {e}")
 
+                elif self.path == '/status':
+                    # Status endpoint - returns current pause state
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    status = {
+                        'paused': viewer_self.subscriber.paused,
+                        'state_received': viewer_self.subscriber.state_received
+                    }
+                    self.wfile.write(json.dumps(status).encode())
+
+                elif self.path == '/health':
+                    # Health check endpoint
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain')
+                    self.end_headers()
+                    self.wfile.write(b'OK\n')
+
                 elif self.path == '/favicon.ico':
                     self.send_response(204)
                     self.end_headers()
                 else:
+                    print(f"[HTTP] 404 - Path not found: {self.path}")
                     self.send_error(404)
 
             def _get_html(self):
-                return f"""
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Lane Detection Viewer (ZMQ)</title>
-                    <style>
-                        body {{
-                            margin: 0;
-                            padding: 20px;
-                            background: #1e1e1e;
-                            color: #ffffff;
-                            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                            display: flex;
-                            flex-direction: column;
-                            align-items: center;
-                        }}
-                        h1 {{
-                            margin: 0 0 20px 0;
-                            font-size: 24px;
-                            font-weight: 300;
-                        }}
-                        .container {{
-                            max-width: 1200px;
-                            width: 100%;
-                        }}
-                        .video-container {{
-                            position: relative;
-                            width: 100%;
-                            background: #000;
-                            border-radius: 8px;
-                            overflow: hidden;
-                            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-                        }}
-                        img {{
-                            width: 100%;
-                            height: auto;
-                            display: block;
-                        }}
-                        .controls {{
-                            margin-top: 20px;
-                            padding: 15px;
-                            background: #2d2d2d;
-                            border-radius: 8px;
-                            display: flex;
-                            gap: 10px;
-                            flex-wrap: wrap;
-                        }}
-                        .btn {{
-                            padding: 10px 20px;
-                            background: #4a4a4a;
-                            border: none;
-                            border-radius: 4px;
-                            color: #fff;
-                            cursor: pointer;
-                            font-size: 14px;
-                            transition: background 0.2s;
-                        }}
-                        .btn:hover {{
-                            background: #5a5a5a;
-                        }}
-                        .btn.primary {{
-                            background: #2196F3;
-                        }}
-                        .btn.primary:hover {{
-                            background: #1976D2;
-                        }}
-                        .btn.warning {{
-                            background: #FF9800;
-                        }}
-                        .btn.warning:hover {{
-                            background: #F57C00;
-                        }}
-                        .info {{
-                            margin-top: 20px;
-                            padding: 15px;
-                            background: #2d2d2d;
-                            border-radius: 8px;
-                            font-size: 14px;
-                        }}
-                        .info-item {{
-                            margin: 5px 0;
-                        }}
-                        .badge {{
-                            display: inline-block;
-                            padding: 2px 8px;
-                            background: #4CAF50;
-                            border-radius: 3px;
-                            font-size: 12px;
-                            font-weight: bold;
-                        }}
-                        .notification {{
-                            position: fixed;
-                            top: 20px;
-                            right: 20px;
-                            background: #4CAF50;
-                            color: white;
-                            padding: 15px 20px;
-                            border-radius: 4px;
-                            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-                            opacity: 0;
-                            transition: opacity 0.3s;
-                            z-index: 1000;
-                        }}
-                        .notification.show {{
-                            opacity: 1;
-                        }}
-                        .notification.error {{
-                            background: #f44336;
-                        }}
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🚗 Lane Detection Viewer <span class="badge">ZMQ MODE</span></h1>
-                        <div class="video-container">
-                            <img src="/stream" alt="Lane Detection Stream">
-                        </div>
-                        <div class="controls">
-                            <button class="btn primary" onclick="sendAction('respawn')">🔄 Respawn Vehicle</button>
-                            <button class="btn warning" id="pauseBtn" onclick="togglePause()">⏸ Pause</button>
-                        </div>
-                        <div class="info">
-                            <div class="info-item">
-                                <strong>Mode:</strong> ZMQ-based (Process Separated)
-                            </div>
-                            <div class="info-item">
-                                <strong>Vehicle URL:</strong> {viewer_self.vehicle_url}
-                            </div>
-                            <div class="info-item">
-                                <strong>Benefits:</strong> Overlays rendered on laptop, vehicle CPU stays free!
-                            </div>
-                        </div>
-                    </div>
+                # Read HTML template from separate file
+                template_path = Path(__file__).parent / 'frontend.html'
+                with open(template_path, 'r') as f:
+                    template = f.read()
 
-                    <div class="notification" id="notification"></div>
+                # Substitute dynamic values
+                return template.format(
+                    vehicle_url=viewer_self.vehicle_url
+                )
 
-                    <script>
-                        let isPaused = false;
+        # Start HTTP server with error handling wrapper
+        def serve_with_error_handling():
+            try:
+                self.http_server.serve_forever()
+            except Exception as e:
+                print(f"[HTTP] Server thread crashed: {e}")
+                import traceback
+                traceback.print_exc()
 
-                        function sendAction(action) {{
-                            fetch('/action', {{
-                                method: 'POST',
-                                headers: {{
-                                    'Content-Type': 'application/json',
-                                }},
-                                body: JSON.stringify({{ action: action }})
-                            }})
-                            .then(response => response.json())
-                            .then(data => {{
-                                if (data.status === 'ok') {{
-                                    showNotification('Action executed: ' + action);
-                                }} else {{
-                                    showNotification('Error: ' + data.message, true);
-                                }}
-                            }})
-                            .catch(error => {{
-                                showNotification('Network error: ' + error, true);
-                            }});
-                        }}
+        try:
+            self.http_server = ThreadingHTTPServer(('0.0.0.0', self.web_port), ViewerRequestHandler)
+            self.http_thread = Thread(target=serve_with_error_handling, daemon=True)
+            self.http_thread.start()
 
-                        function togglePause() {{
-                            isPaused = !isPaused;
-                            sendAction(isPaused ? 'pause' : 'resume');
+            # Give server a moment to start
+            time.sleep(0.2)
 
-                            const btn = document.getElementById('pauseBtn');
-                            if (isPaused) {{
-                                btn.textContent = '▶️ Resume';
-                                btn.classList.add('primary');
-                                btn.classList.remove('warning');
-                            }} else {{
-                                btn.textContent = '⏸ Pause';
-                                btn.classList.remove('primary');
-                                btn.classList.add('warning');
-                            }}
-                        }}
-
-                        function showNotification(message, isError = false) {{
-                            const notif = document.getElementById('notification');
-                            notif.textContent = message;
-                            notif.className = 'notification show' + (isError ? ' error' : '');
-
-                            setTimeout(() => {{
-                                notif.classList.remove('show');
-                            }}, 3000);
-                        }}
-
-                        // Keyboard shortcuts
-                        document.addEventListener('keydown', function(event) {{
-                            if (event.key === 'r' || event.key === 'R') {{
-                                event.preventDefault();
-                                sendAction('respawn');
-                            }} else if (event.key === ' ') {{
-                                event.preventDefault();
-                                togglePause();
-                            }}
-                        }});
-                    </script>
-                </body>
-                </html>
-                """
-
-        # Start HTTP server
-        self.http_server = ThreadingHTTPServer(('', self.web_port), ViewerRequestHandler)
-        self.http_thread = Thread(target=self.http_server.serve_forever, daemon=True)
-        self.http_thread.start()
-
-        print(f"✓ HTTP server started on port {self.web_port}")
+            # Verify thread is still running
+            if self.http_thread.is_alive():
+                print(f"✓ HTTP server started on port {self.web_port}")
+                print(f"  Server listening on: http://0.0.0.0:{self.web_port}")
+                print(f"  Local access: http://localhost:{self.web_port}")
+                print(f"  Remote access (via VSCode): http://localhost:{self.web_port}")
+                print(f"")
+            else:
+                print(f"✗ HTTP server thread died immediately!")
+        except Exception as e:
+            print(f"✗ Failed to start HTTP server: {e}")
+            import traceback
+            traceback.print_exc()
 
     def stop(self):
         """Stop viewer."""
@@ -501,6 +437,7 @@ class ZMQWebViewer:
 
         self.subscriber.close()
         self.action_publisher.close()
+        self.parameter_publisher.close()
 
         print("✓ ZMQ Web Viewer stopped")
 
@@ -517,22 +454,43 @@ class ZMQWebViewer:
 def main():
     """Main entry point for ZMQ web viewer."""
     import argparse
+    from lkas.detection.core.config import ConfigManager
 
     parser = argparse.ArgumentParser(description="ZMQ Web Viewer - Laptop Side")
+    parser.add_argument('--config', type=str, default=None,
+                       help="Path to configuration file (default: <project-root>/config.yaml)")
     parser.add_argument('--vehicle', type=str, default="tcp://localhost:5557",
                        help="ZMQ URL to receive vehicle data")
     parser.add_argument('--actions', type=str, default="tcp://localhost:5558",
                        help="ZMQ URL to send actions")
-    parser.add_argument('--port', type=int, default=8080,
-                       help="HTTP port for web interface")
+    parser.add_argument('--parameters', type=str, default="tcp://localhost:5559",
+                       help="ZMQ URL to send parameter updates")
+    parser.add_argument('--port', type=int, default=None,
+                       help="HTTP port for web interface (overrides config, default: from config.yaml)")
+    parser.add_argument('--verbose', action='store_true',
+                       help="Enable verbose HTTP request logging")
+    parser.add_argument('--simulation-mode', action='store_true',
+                       help="Use simulation mode (bind as server). Default is LKAS mode (connect to broker).")
 
     args = parser.parse_args()
+
+    # Load configuration
+    config = ConfigManager.load(args.config)
+
+    # Determine web port: CLI arg overrides config
+    web_port = args.port if args.port is not None else config.visualization.web_port
+
+    # Determine mode: LKAS mode (connect to broker) is default
+    lkas_mode = not args.simulation_mode
 
     # Create and run viewer
     viewer = ZMQWebViewer(
         vehicle_url=args.vehicle,
         action_url=args.actions,
-        web_port=args.port
+        parameter_bind_url=args.parameters,
+        web_port=web_port,
+        verbose=args.verbose,
+        lkas_mode=lkas_mode
     )
 
     viewer.start()

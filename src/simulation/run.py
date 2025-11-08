@@ -16,9 +16,9 @@ Note: This has been refactored to use SimulationOrchestrator for clean architect
 import argparse
 import sys
 
-from detection.core.config import ConfigManager
+from lkas.detection.core.config import ConfigManager
 from simulation.orchestrator import SimulationOrchestrator, SimulationConfig
-from core.constants import CommunicationConstants, SimulationConstants
+from simulation.constants import CommunicationConstants, SimulationConstants
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -90,11 +90,18 @@ def parse_arguments() -> argparse.Namespace:
         help="Enable latency tracking and reporting (adds overhead)",
     )
 
-    # ZMQ Broadcasting options
+    parser.add_argument(
+        "--control-shm-name",
+        type=str,
+        default="control_commands",
+        help="Shared memory name for control commands (default: control_commands)",
+    )
+
+    # ZMQ Broadcasting options (legacy - always enabled now)
     parser.add_argument(
         "--broadcast",
         action="store_true",
-        help="Enable ZMQ broadcasting for remote viewers",
+        help="(Legacy flag - broadcasting is now always enabled for viewer support)",
     )
     parser.add_argument(
         "--broadcast-url",
@@ -107,6 +114,11 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
         default=f"tcp://*:{CommunicationConstants.DEFAULT_ACTION_PORT}",
         help=f"ZMQ URL for receiving actions (default: tcp://*:{CommunicationConstants.DEFAULT_ACTION_PORT})",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose output (lane status, steering info)",
     )
 
     return parser.parse_args()
@@ -125,10 +137,10 @@ def print_banner(config: SimulationConfig, system_config: object):
     print("=" * 60)
     print(f"CARLA Server: {config.carla_host}:{config.carla_port}")
 
-    # Detection mode (shared memory only)
-    print(f"Detection Mode: SHARED MEMORY (ultra-low latency)")
-    print(f"  Image output: {config.image_shm_name}")
-    print(f"  Detection input: {config.detection_shm_name}")
+    print(f"SHARED MEMORY TABLE")
+    print(f"  Image: {config.image_shm_name}")
+    print(f"  Detection: {config.detection_shm_name}")
+    print(f"  Control: {config.control_shm_name}")
     print(f"  Timeout: {config.detector_timeout}ms")
 
     print(f"Camera: {system_config.camera.width}x{system_config.camera.height}")
@@ -174,13 +186,15 @@ def main():
         base_throttle=args.base_throttle,
         warmup_frames=args.warmup_frames,
         enable_latency_tracking=args.latency,
+        control_shm_name=args.control_shm_name,
+        verbose=args.verbose,
     )
 
     # Print banner
     print_banner(sim_config, system_config)
 
     # Create orchestrator
-    orchestrator = SimulationOrchestrator(sim_config, system_config)
+    orchestrator = SimulationOrchestrator(sim_config, system_config, verbose=args.verbose)
 
     # Setup all subsystems
     if not orchestrator.setup():

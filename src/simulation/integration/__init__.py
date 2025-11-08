@@ -1,7 +1,28 @@
-"""Integration layer for coordinating CARLA, Detection, and Decision modules."""
+"""
+Integration layer for coordinating CARLA with LKAS (Lane Keeping Assist System).
 
-# Import only messages and communication (no circular deps)
-from .messages import (
+Note: LKAS components are in the lkas module.
+This module maintains backwards compatibility by re-exporting them.
+
+For communication with LKAS, use the clean API:
+    from lkas import LKAS
+
+    lkas = LKAS(image_shape=(600, 800, 3))
+    lkas.send_image(image, timestamp, frame_id)
+    control = lkas.get_control()
+
+Or use components directly:
+    from lkas.detection import DetectionClient
+
+    client = DetectionClient(
+        detection_shm_name="detection_results",
+        image_shm_name="camera_feed",
+        image_shape=(600, 800, 3)
+    )
+"""
+
+# Re-export messages from lkas.integration
+from lkas.integration.messages import (
     ImageMessage,
     LaneMessage,
     DetectionMessage,
@@ -10,13 +31,12 @@ from .messages import (
     SystemStatus,
     PerformanceMetrics
 )
-from .communication import DetectionClient, DetectionServer
 
-# Orchestrators are imported directly where needed to avoid circular imports
-# Use: from integration.orchestrator import SystemOrchestrator
-# Use: from integration.distributed_orchestrator import DistributedOrchestrator
+# Re-export detection communication API (for backwards compatibility)
+from lkas.detection import DetectionClient
 
 __all__ = [
+    # Messages
     'ImageMessage',
     'LaneMessage',
     'DetectionMessage',
@@ -24,6 +44,7 @@ __all__ = [
     'ControlMode',
     'SystemStatus',
     'PerformanceMetrics',
+
+    # Detection Communication (clean API)
     'DetectionClient',
-    'DetectionServer',
 ]
