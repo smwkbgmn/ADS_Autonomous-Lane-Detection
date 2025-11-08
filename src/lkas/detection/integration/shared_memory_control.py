@@ -24,7 +24,7 @@ import struct
 import time
 from dataclasses import dataclass
 from typing import Optional
-from multiprocessing import shared_memory, Lock
+from multiprocessing import shared_memory, Lock, resource_tracker
 
 from lkas.detection.integration.messages import ControlMessage, ControlMode
 
@@ -343,10 +343,28 @@ class SharedMemoryControlChannel:
 
     def close(self):
         """Close shared memory."""
-        # Release memory views first
-        del self.header_view
-        del self.data_view
-        self.shm.close()
+        try:
+            # Release memory views first
+            if hasattr(self, 'header_view'):
+                del self.header_view
+            if hasattr(self, 'data_view'):
+                del self.data_view
+        except Exception:
+            pass  # Views might already be freed if shared memory was unlinked
+        finally:
+            # Always close the shared memory
+            if hasattr(self, 'shm') and self.shm:
+                try:
+                    self.shm.close()
+                except Exception:
+                    pass
+                # Unregister from resource tracker to prevent leak warnings
+                # This is safe for both creators and readers
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                except (KeyError, AttributeError):
+                    # Already unregistered or shm._name doesn't exist - that's fine
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""

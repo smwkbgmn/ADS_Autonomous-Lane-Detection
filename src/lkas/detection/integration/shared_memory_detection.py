@@ -42,7 +42,7 @@ import time
 import json
 from dataclasses import dataclass, asdict
 from typing import Optional
-from multiprocessing import shared_memory, Lock, Value
+from multiprocessing import shared_memory, Lock, Value, resource_tracker
 import struct
 
 from lkas.detection.integration.messages import ImageMessage, DetectionMessage, LaneMessage
@@ -347,10 +347,28 @@ class SharedMemoryImageChannel:
 
     def close(self):
         """Close shared memory."""
-        # Release array views first
-        del self.image_view
-        del self.header_view
-        self.shm.close()
+        try:
+            # Release array views first
+            if hasattr(self, 'image_view'):
+                del self.image_view
+            if hasattr(self, 'header_view'):
+                del self.header_view
+        except Exception:
+            pass  # Views might already be freed if shared memory was unlinked
+        finally:
+            # Always close the shared memory
+            if hasattr(self, 'shm') and self.shm:
+                try:
+                    self.shm.close()
+                except Exception:
+                    pass
+                # Unregister from resource tracker to prevent leak warnings
+                # This is safe for both creators and readers
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                except (KeyError, AttributeError):
+                    # Already unregistered or shm._name doesn't exist - that's fine
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""
@@ -508,11 +526,30 @@ class SharedMemoryDetectionChannel:
 
     def close(self):
         """Close shared memory."""
-        # Release memory views first
-        del self.header_view
-        del self.left_lane_view
-        del self.right_lane_view
-        self.shm.close()
+        try:
+            # Release memory views first
+            if hasattr(self, 'header_view'):
+                del self.header_view
+            if hasattr(self, 'left_lane_view'):
+                del self.left_lane_view
+            if hasattr(self, 'right_lane_view'):
+                del self.right_lane_view
+        except Exception:
+            pass  # Views might already be freed if shared memory was unlinked
+        finally:
+            # Always close the shared memory
+            if hasattr(self, 'shm') and self.shm:
+                try:
+                    self.shm.close()
+                except Exception:
+                    pass
+                # Unregister from resource tracker to prevent leak warnings
+                # This is safe for both creators and readers
+                try:
+                    resource_tracker.unregister(self.shm._name, "shared_memory")
+                except (KeyError, AttributeError):
+                    # Already unregistered or shm._name doesn't exist - that's fine
+                    pass
 
     def unlink(self):
         """Unlink (delete) shared memory."""

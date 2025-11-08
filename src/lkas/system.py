@@ -22,7 +22,8 @@ class LKAS:
     Just send images and get control commands!
 
     Usage:
-        # Initialize LKAS
+        # Make sure LKAS servers are running first (they create the shared memory)
+        # Then initialize LKAS client
         lkas = LKAS(
             image_shm_name="camera_feed",
             detection_shm_name="detection_results",
@@ -41,7 +42,7 @@ class LKAS:
             # Apply to vehicle
             vehicle.apply(control.steering, control.throttle, control.brake)
 
-        # Cleanup
+        # Cleanup (just close connections, servers own the memory)
         lkas.close()
     """
 
@@ -126,13 +127,6 @@ class LKAS:
         self._detection_client.close()
         self._decision_client.close()
 
-    def unlink(self):
-        """
-        Unlink/destroy shared memory segments.
-        Only call this from the process that created the LKAS instance.
-        """
-        self._detection_client.unlink()
-
 
 class LKASSimple:
     """
@@ -174,7 +168,3 @@ class LKASSimple:
     def close(self):
         """Close LKAS."""
         self._lkas.close()
-
-    def unlink(self):
-        """Cleanup shared memory."""
-        self._lkas.unlink()

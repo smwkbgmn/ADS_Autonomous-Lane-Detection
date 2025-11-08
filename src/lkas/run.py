@@ -682,13 +682,17 @@ class LKASLauncher:
         if self.image_channel:
             try:
                 self.image_channel.close()
-            except:
-                pass
+            except Exception as e:
+                # Log but don't fail - shared memory might already be unlinked
+                if self.verbose:
+                    self.terminal.print(f"  (Image channel close: {e})")
         if self.detection_channel:
             try:
                 self.detection_channel.close()
-            except:
-                pass
+            except Exception as e:
+                # Log but don't fail - shared memory might already be unlinked
+                if self.verbose:
+                    self.terminal.print(f"  (Detection channel close: {e})")
 
         # Stop broker
         if self.broker:

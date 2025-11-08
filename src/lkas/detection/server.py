@@ -129,15 +129,15 @@ class DetectionServer:
 
     def _connect_to_image_input(self):
         """Internal method to connect to image input."""
-        print(f"\nConnecting to image shared memory '{self.image_shm_name}'...")
+        print(f"\nCreating image shared memory '{self.image_shm_name}'...")
         self.image_channel = SharedMemoryImageChannel(
             name=self.image_shm_name,
             shape=(self.config.camera.height, self.config.camera.width, 3),
-            create=False,  # Reader mode
+            create=True,  # Creator mode - LKAS owns this memory
             retry_count=self.retry_count,
             retry_delay=self.retry_delay,
         )
-        print(f"✓ Connected to image input")
+        print(f"✓ Created image input")
 
     def connect_to_image_input(self):
         """
@@ -255,12 +255,14 @@ class DetectionServer:
         if self.param_client:
             self.param_client.close()
 
-        # Close channels (check if they exist)
+        # Close and unlink channels (we created them)
         if self.image_channel:
             self.image_channel.close()
+            # Unlink image channel (we created it)
+            self.image_channel.unlink()
         if self.detection_channel:
             self.detection_channel.close()
-            # Unlink output channel (we created it)
+            # Unlink detection channel (we created it)
             self.detection_channel.unlink()
 
         print("✓ Detection server stopped")

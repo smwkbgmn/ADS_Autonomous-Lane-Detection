@@ -315,8 +315,9 @@ class SimulationOrchestrator:
 
                 # Get image from camera
                 image = self.camera.get_latest_image()
-                if image is None and self.config.verbose:
-                    print("No image received yet, skipping frame...")
+                if image is None:
+                    if self.config.verbose:
+                        print("No image received yet, skipping frame...")
                     continue
 
                 # Send image to LKAS
@@ -485,10 +486,9 @@ class SimulationOrchestrator:
         if self.action_subscriber:
             self.action_subscriber.close()
 
-        # Cleanup LKAS
+        # Cleanup LKAS (just close, don't unlink - LKAS servers own the memory)
         if self.lkas:
             self.lkas.close()
-            self.lkas.unlink()
 
         if self.camera:
             self.camera.destroy_camera()

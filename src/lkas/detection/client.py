@@ -74,7 +74,7 @@ class DetectionClient:
             retry_delay=retry_delay
         )
 
-        # Optionally create image channel (writer) if image_shm_name provided
+        # Optionally connect to image channel (writer) if image_shm_name provided
         self._image_channel = None
         if image_shm_name is not None:
             if image_shape is None:
@@ -83,7 +83,7 @@ class DetectionClient:
             self._image_channel = SharedMemoryImageChannel(
                 name=image_shm_name,
                 shape=image_shape,
-                create=True,
+                create=False,  # Connect to existing shared memory created by detection server
                 retry_count=retry_count,
                 retry_delay=retry_delay
             )
@@ -124,8 +124,3 @@ class DetectionClient:
         self._detection_channel.close()
         if self._image_channel is not None:
             self._image_channel.close()
-
-    def unlink(self):
-        """Unlink/destroy shared memory segments (call from creator process only)."""
-        if self._image_channel is not None:
-            self._image_channel.unlink()
