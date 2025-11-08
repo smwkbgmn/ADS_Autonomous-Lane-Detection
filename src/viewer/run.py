@@ -15,7 +15,6 @@ import cv2
 import zmq
 import time
 import json
-import base64
 import asyncio
 import websockets
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -99,6 +98,12 @@ class ZMQWebViewer:
         self.ws_port = web_port + 1  # WebSocket on port+1 (e.g., 8081 if HTTP is 8080)
         self.ws_server = None
         self.ws_thread: Optional[Thread] = None
+        self.ws_loop = None  # Will be set when WebSocket server starts
+        self.ws_ready = False  # Flag to indicate WebSocket is ready
+
+        # Frame rate limiting for WebSocket
+        self.last_ws_frame_time = 0
+        self.ws_frame_interval = 1.0 / 80.0  # 80 FPS max
 
         self.running = False
 
@@ -128,8 +133,14 @@ class ZMQWebViewer:
         self.ws_thread = Thread(target=self._run_ws_server, daemon=True)
         self.ws_thread.start()
 
-        # Wait a moment for servers to start
-        time.sleep(0.3)
+        # Wait for WebSocket server to be ready (max 5 seconds)
+        wait_time = 0
+        while not self.ws_ready and wait_time < 5:
+            time.sleep(0.1)
+            wait_time += 0.1
+
+        if not self.ws_ready:
+            print("⚠️  Warning: WebSocket server may not have started properly")
 
         # Start ZMQ polling thread
         zmq_thread = Thread(target=self._zmq_poll_loop, daemon=True)
@@ -263,29 +274,28 @@ class ZMQWebViewer:
         if self.rendered_frame is None:
             return
 
+        # Frame rate limiting - only send if enough time has passed
+        current_time = time.time()
+        if current_time - self.last_ws_frame_time < self.ws_frame_interval:
+            return
+        self.last_ws_frame_time = current_time
+
         # Remove disconnected clients
         with self.ws_lock:
             if not self.ws_clients:
                 return
 
-        # Encode frame as JPEG
+        # Encode frame as JPEG (balanced quality/speed)
         success, buffer = cv2.imencode('.jpg', self.rendered_frame,
-                                       [cv2.IMWRITE_JPEG_QUALITY, 95])
+                                       [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not success:
             return
 
-        # Convert to base64
-        frame_base64 = base64.b64encode(buffer.tobytes()).decode('utf-8')
+        # Send binary frame directly (no base64!)
+        frame_bytes = buffer.tobytes()
 
-        # Create message
-        message = json.dumps({
-            'type': 'frame',
-            'data': frame_base64,
-            'timestamp': time.time()
-        })
-
-        # Broadcast to all connected clients
-        self._broadcast_ws(message)
+        # Broadcast binary to all connected clients
+        self._broadcast_ws_binary(frame_bytes)
 
     def _broadcast_status_ws(self):
         """Broadcast status to all WebSocket clients."""
@@ -309,7 +319,11 @@ class ZMQWebViewer:
         self._broadcast_ws(message)
 
     def _broadcast_ws(self, message: str):
-        """Broadcast message to all WebSocket clients."""
+        """Broadcast JSON message to all WebSocket clients."""
+        # Check if WebSocket loop is ready
+        if not hasattr(self, 'ws_loop') or self.ws_loop is None:
+            return
+
         with self.ws_lock:
             dead_clients = set()
             for client in self.ws_clients:
@@ -319,7 +333,29 @@ class ZMQWebViewer:
                         client.send(message),
                         self.ws_loop
                     )
-                except Exception as e:
+                except Exception:
+                    # Mark client for removal
+                    dead_clients.add(client)
+
+            # Remove dead clients
+            self.ws_clients -= dead_clients
+
+    def _broadcast_ws_binary(self, data: bytes):
+        """Broadcast binary data to all WebSocket clients."""
+        # Check if WebSocket loop is ready
+        if not hasattr(self, 'ws_loop') or self.ws_loop is None:
+            return
+
+        with self.ws_lock:
+            dead_clients = set()
+            for client in self.ws_clients:
+                try:
+                    # Use asyncio to send binary message in event loop
+                    asyncio.run_coroutine_threadsafe(
+                        client.send(data),
+                        self.ws_loop
+                    )
+                except Exception:
                     # Mark client for removal
                     dead_clients.add(client)
 
@@ -345,7 +381,8 @@ class ZMQWebViewer:
                         # Handle action (pause, resume, respawn)
                         action = data.get('action')
                         self.action_publisher.send_action(action)
-                        print(f"[WebSocket] Action from {client_addr}: {action}")
+                        if self.verbose:
+                            print(f"[WebSocket] Action from {client_addr}: {action}")
 
                     elif msg_type == 'parameter':
                         # Handle parameter update
@@ -375,15 +412,36 @@ class ZMQWebViewer:
         self.ws_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.ws_loop)
 
-        async def serve():
-            async with websockets.serve(self._ws_handler, '0.0.0.0', self.ws_port):
+        async def start_server():
+            try:
+                server = await websockets.serve(
+                    self._ws_handler,
+                    '0.0.0.0',
+                    self.ws_port,
+                    ping_interval=20,
+                    ping_timeout=20
+                )
                 print(f"✓ WebSocket server started on port {self.ws_port}")
-                await asyncio.Future()  # Run forever
+                self.ws_ready = True  # Signal that server is ready
+                return server
+            except Exception as e:
+                print(f"[WebSocket] Server startup error: {e}")
+                import traceback
+                traceback.print_exc()
+                self.ws_ready = False
+                return None
 
         try:
-            self.ws_loop.run_until_complete(serve())
+            # Start the server
+            server = self.ws_loop.run_until_complete(start_server())
+
+            if server:
+                # Run the event loop forever
+                self.ws_loop.run_forever()
         except Exception as e:
             print(f"[WebSocket] Server error: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             self.ws_loop.close()
 
@@ -533,7 +591,7 @@ class ZMQWebViewer:
                                     time.sleep(1)
                                     continue
 
-                            time.sleep(0.033)  # ~30 FPS
+                            time.sleep(0.01)  # ~100 FPS
                     except Exception as e:
                         print(f"[HTTP] Stream ended: {e}")
 

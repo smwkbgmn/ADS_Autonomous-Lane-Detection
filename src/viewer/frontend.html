@@ -276,31 +276,44 @@
             }};
 
             ws.onmessage = function(event) {{
-                try {{
-                    const msg = JSON.parse(event.data);
+                // Check if binary (frame) or text (status)
+                if (event.data instanceof Blob) {{
+                    // Binary frame data
+                    const img = document.getElementById('videoStream');
+                    const url = URL.createObjectURL(event.data);
 
-                    if (msg.type === 'frame') {{
-                        // Update video stream
-                        const img = document.getElementById('videoStream');
-                        img.src = 'data:image/jpeg;base64,' + msg.data;
-
-                        // Update FPS counter
-                        frameCount++;
-
-                        // Calculate latency
-                        if (msg.timestamp) {{
-                            const latency = (Date.now() / 1000 - msg.timestamp) * 1000;
-                            document.getElementById('latencyDisplay').textContent = latency.toFixed(0);
-                        }}
-
-                    }} else if (msg.type === 'status') {{
-                        // Update status
-                        if (msg.state_received) {{
-                            updateButtonState(msg.paused);
-                        }}
+                    // Clean up old URL
+                    if (img.src && img.src.startsWith('blob:')) {{
+                        URL.revokeObjectURL(img.src);
                     }}
-                }} catch (e) {{
-                    console.error('Error processing message:', e);
+
+                    img.src = url;
+
+                    // Update FPS counter
+                    frameCount++;
+
+                    // Latency calculation (approximate, no timestamp in binary)
+                    const now = Date.now();
+                    if (window.lastFrameReceived) {{
+                        const latency = now - window.lastFrameReceived;
+                        document.getElementById('latencyDisplay').textContent = latency.toFixed(0);
+                    }}
+                    window.lastFrameReceived = now;
+
+                }} else {{
+                    // Text message (status)
+                    try {{
+                        const msg = JSON.parse(event.data);
+
+                        if (msg.type === 'status') {{
+                            // Update status
+                            if (msg.state_received) {{
+                                updateButtonState(msg.paused);
+                            }}
+                        }}
+                    }} catch (e) {{
+                        console.error('Error processing message:', e);
+                    }}
                 }}
             }};
 
