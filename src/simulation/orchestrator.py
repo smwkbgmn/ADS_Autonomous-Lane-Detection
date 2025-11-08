@@ -19,7 +19,6 @@ from simulation.integration.zmq_broadcast import (
     VehicleStatusPublisher,
     ActionSubscriber,
     VehicleState,
-    ParameterBroker,
 )
 from simulation.constants import SimulationConstants
 from rich.console import Console
@@ -46,9 +45,6 @@ class SimulationConfig:
     spawn_point: int | None = None
     control_shm_name: str = "control_commands"
     verbose: bool = False
-    enable_parameter_broker: bool = True
-    parameter_viewer_url: str = "tcp://localhost:5559"
-    parameter_servers_url: str = "tcp://*:5560"
 
 
 class SimulationOrchestrator:
@@ -82,7 +78,6 @@ class SimulationOrchestrator:
         self.lkas: LKAS | None = None
         self.status_publisher: VehicleStatusPublisher | None = None
         self.action_subscriber: ActionSubscriber | None = None
-        self.parameter_broker: ParameterBroker | None = None
 
         # State
         self.running = False

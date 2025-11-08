@@ -118,13 +118,14 @@ Simulation              LKAS Broker
 ### LKAS Main Process (Broker Side)
 
 ```python
-from lkas.integration.zmq import LKASBroker, VehicleState
+from lkas.integration.zmq import LKASBroker
 
 # Initialize broker with --broadcast flag
 if args.broadcast:
     broker = LKASBroker()
 
-    # Register action handlers
+    # Optional: Register local action handlers
+    # (Actions are also forwarded to simulation automatically)
     broker.register_action('pause', on_pause)
     broker.register_action('resume', on_resume)
 else:
@@ -133,6 +134,10 @@ else:
 # Main loop
 while running:
     # Poll for incoming messages (non-blocking)
+    # This handles:
+    # - Parameter updates from viewer → forwards to detection/decision servers
+    # - Action requests from viewer → forwards to simulation + local handlers
+    # - Vehicle status from simulation → forwards to viewers
     if broker:
         broker.poll()
 
@@ -140,21 +145,24 @@ while running:
     read_detection_output()
     read_decision_output()
 
-    # Broadcast state periodically
-    if broker and time.time() - last_broadcast > 1.0:
-        state = VehicleState(
-            timestamp=time.time(),
-            frame_id=frame_id,
-            x=vehicle.x,
-            y=vehicle.y,
-            yaw=vehicle.yaw,
-            velocity=vehicle.velocity,
-            steering_angle=vehicle.steering,
-            left_lane_detected=detection.left_lane is not None,
-            right_lane_detected=detection.right_lane is not None,
-        )
-        broker.broadcast_state(state)
-        last_broadcast = time.time()
+    # Broadcast frames and detection data from shared memory
+    if broker:
+        # Read from shared memory channels
+        image_msg = image_channel.read()
+        detection_msg = detection_channel.read()
+
+        if image_msg:
+            broker.broadcast_frame(image_msg.image, image_msg.frame_id)
+
+        if detection_msg:
+            # Convert to viewer format
+            detection_data = {
+                'left_lane': {...} if detection_msg.left_lane else None,
+                'right_lane': {...} if detection_msg.right_lane else None,
+                'processing_time_ms': detection_msg.processing_time_ms,
+                'frame_id': detection_msg.frame_id,
+            }
+            broker.broadcast_detection(detection_data, detection_msg.frame_id)
 
 # Cleanup
 if broker:
@@ -235,26 +243,31 @@ client.close()
 ## Running LKAS with Broadcasting
 
 ```bash
-# 1. Start LKAS with broadcasting enabled (starts broker)
+# 1. Start CARLA
+./CarlaUE4.sh
+
+# 2. Start LKAS with broadcasting enabled (starts ZMQ broker)
 lkas --method cv --broadcast
 
-# 2. Start simulation in another terminal (connects to LKAS broker)
-simulation --spawn 1
+# 3. Start simulation with broadcasting (sends vehicle status to LKAS broker)
+simulation --broadcast
 
-# 3. Start viewer in another terminal (connects to LKAS broker)
-viewer tcp://localhost:5557
+# 4. Start viewer (connects to LKAS broker)
+viewer
+
+# Open browser: http://localhost:8080
 
 # The viewer can now:
 # - See live video stream with lane detection overlay
-# - View vehicle state in real-time (speed, steering, etc.)
-# - Adjust detection/decision parameters (Kp, Kd, etc.)
+# - View vehicle state in real-time (speed, steering, position)
+# - Adjust detection/decision parameters (Canny, Hough, Kp, Kd, etc.)
 # - Send actions (pause, resume, respawn)
 
 # Data flow:
-# - Simulation → LKAS broker → Viewer (vehicle status)
-# - LKAS → LKAS broker → Viewer (frames, detection)
-# - Viewer → LKAS broker → Servers (parameter updates)
-# - Viewer → LKAS broker → Simulation (actions)
+# - Simulation → LKAS broker (port 5562) → Viewer (vehicle status)
+# - LKAS (shared memory) → LKAS broker → Viewer (frames, detection)
+# - Viewer → LKAS broker (port 5559) → Detection/Decision servers (parameters)
+# - Viewer → LKAS broker (port 5558) → Simulation (actions)
 ```
 
 ## Migration from Simulation-based Broker

@@ -1,123 +1,169 @@
 # Viewer Module
 
-**Remote web-based viewer for monitoring autonomous vehicles.**
+**Standalone ZMQ-based web viewer for remote monitoring of autonomous vehicles.**
 
 ## Overview
 
-The viewer module runs on your **laptop** (not the vehicle!) and:
-- ✅ Receives data from vehicle via ZMQ
-- ✅ Draws overlays (lanes, HUD, metrics)
-- ✅ Serves web interface for browser viewing
-- ✅ Sends commands back to vehicle (respawn, pause)
+The viewer runs as a **separate process** and connects to the LKAS ZMQ broker to:
+- ✅ Receives video frames, lane detection, and vehicle status via ZMQ (port 5557)
+- ✅ Renders overlays on laptop (offloads vehicle CPU)
+- ✅ Serves web interface on localhost:8080
+- ✅ Sends commands (pause/resume/respawn) back to simulation
+- ✅ Adjusts detection/decision parameters in real-time
 
 ## Why Separate Viewer?
 
-**Problem with old approach:**
-- ❌ Rendering runs on vehicle CPU
-- ❌ Heavy overlay drawing impacts control loop
-- ❌ Not suitable for resource-constrained devices
-
-**Benefits of new approach:**
-- ✅ **Vehicle stays lightweight** - No rendering on vehicle!
-- ✅ **Rich visualizations** - Draw complex overlays on laptop
-- ✅ **Remote monitoring** - Monitor from any machine on network
-- ✅ **Multiple viewers** - Multiple laptops can connect
+**Benefits:**
+- ✅ **Offloads vehicle CPU** - All rendering happens on laptop!
+- ✅ **Rich visualizations** - Complex overlays don't impact vehicle performance
+- ✅ **Remote monitoring** - Connect from any machine on network
+- ✅ **Multiple viewers** - Multiple people can monitor simultaneously
+- ✅ **Live tuning** - Adjust parameters without restarting system
 
 ## Quick Start
 
-### Integrated with Simulation
-
-The web viewer is built into the simulation module. Simply use:
+The viewer connects to the LKAS ZMQ broker which receives data from simulation.
 
 ```bash
-# Start LKAS with web viewer (uses port from config.yaml)
-lkas --method cv --viewer web
+# Terminal 1: Start CARLA
+./CarlaUE4.sh
 
-# Or start simulation alone with web viewer
-simulation --viewer web
+# Terminal 2: Start LKAS with ZMQ broker enabled
+lkas --method cv --broadcast
 
-# Override port from command line if needed
-simulation --viewer web --web-port 8081
+# Terminal 3: Start simulation with broadcasting
+simulation --broadcast
+
+# Terminal 4: Start web viewer
+viewer
 
 # Open browser
-# http://localhost:8080 (or your custom port)
+# http://localhost:8080
 ```
 
-### Standalone Viewer (Future)
+### Port Configuration
 
-For remote monitoring scenarios, a standalone viewer can be developed to connect via network.
+Web viewer port can be configured in `config.yaml`:
+
+```yaml
+visualization:
+  web_port: 8080  # Default port
+```
+
+Or override via command line:
+
+```bash
+viewer --port 8081
+```
 
 ## Usage
 
-### Integrated Mode
-
-The viewer is integrated into the simulation module:
+### Command Line Options
 
 ```bash
-# Web viewer (uses port from config.yaml, default: 8080)
-simulation --viewer web
+viewer --help
 
-# Override web port from command line
-simulation --viewer web --web-port 8081
-
-# OpenCV window viewer
-simulation --viewer opencv
-
-# Pygame viewer
-simulation --viewer pygame
-
-# No visualization (headless)
-simulation --viewer none
+Options:
+  --vehicle URL      ZMQ URL for vehicle data (default: tcp://localhost:5557)
+  --actions URL      ZMQ URL for sending actions (default: tcp://localhost:5558)
+  --parameters URL   ZMQ URL for parameter updates (default: tcp://localhost:5559)
+  --port N           HTTP port for web interface (default: from config.yaml)
+  --config PATH      Path to config file (default: auto-detected)
+  --verbose          Enable verbose HTTP logging
 ```
 
-### Web Viewer Features
+### Features
 
-- **Real-time video streaming** from CARLA camera
-- **Lane overlay visualization** (left/right lanes)
-- **HUD display** with metrics:
-  - Speed, steering angle
-  - Lane offset, heading angle
-  - Detection FPS, latency
-- **Interactive controls**:
-  - Respawn vehicle
-  - Toggle autopilot
-  - Adjust view settings
+**Real-time Visualization:**
+- **Video streaming** with lane overlays rendered on laptop
+- **Lane detection overlay** (left/right lanes with confidence)
+- **HUD display** with vehicle telemetry:
+  - Speed (km/h), steering angle
+  - Position (x, y), rotation (pitch, yaw, roll)
+  - Detection processing time
+
+**Interactive Controls:**
+- **Pause/Resume** simulation via web button
+- **Respawn vehicle** at spawn point
+- **Live parameter tuning** for detection and decision modules
+  - Detection: Canny thresholds, Hough parameters, smoothing
+  - Decision: PID gains (Kp, Kd), throttle settings
+
+**Network Monitoring:**
+- Works over local network or WiFi
+- Multiple viewers can connect simultaneously
+- Automatic reconnection on network issues
 
 ## Architecture
 
 ```
-┌─ SIMULATION PROCESS ──────────────────────────────────────┐
-│                                                            │
-│  ┌──────────┐      ┌──────────────┐      ┌────────────┐  │
-│  │  CARLA   │ ───▶ │  Detection   │ ───▶ │  Decision  │  │
-│  │  Camera  │      │  (Shared Mem)│      │ (Shared Mem│  │
-│  └──────────┘      └──────────────┘      └────────────┘  │
-│       │                    │                     │        │
-│       │ Image              │ Lanes               │ Steer  │
-│       ▼                    ▼                     ▼        │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │           Frame Processor & Visualizer              │  │
-│  │  • Draws lane overlays                              │  │
-│  │  • Renders HUD with metrics                         │  │
-│  │  • Generates JPEG stream                            │  │
-│  └─────────────────────────────────────────────────────┘  │
-│                              │                            │
-│                              ▼                            │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │           Web Server (Flask/HTTP)                   │  │
-│  │  • Serves HTML interface                            │  │
-│  │  • Streams MJPEG video                              │  │
-│  │  • Handles user interactions                        │  │
-│  └─────────────────────────────────────────────────────┘  │
-│                              │                            │
-└──────────────────────────────┼────────────────────────────┘
-                               │ HTTP
-                               ▼
-                      ┌────────────────┐
-                      │    Browser     │
-                      │  localhost:8080│
-                      └────────────────┘
+┌─ CARLA Simulator ────────────────────────────────────────┐
+│  • Provides camera images                                │
+│  • Receives steering commands                            │
+└───────────────┬──────────────────────────────────────────┘
+                │ Shared Memory
+                ▼
+┌─ Simulation Orchestrator ────────────────────────────────┐
+│  • Reads LKAS detection/control via shared memory        │
+│  • Publishes vehicle status to LKAS broker (port 5562)   │
+│  • Receives actions from LKAS broker (port 5561)         │
+└───────────────┬──────────────────────────────────────────┘
+                │ ZMQ (Vehicle Status)
+                ▼
+┌─ LKAS ZMQ Broker (port 5557-5562) ───────────────────────┐
+│  • Receives vehicle status from simulation                │
+│  • Receives frames/detection from LKAS shared memory      │
+│  • Broadcasts all data to viewers (port 5557)            │
+│  • Routes parameters to detection/decision servers        │
+│  • Forwards actions to simulation                        │
+└───────────────┬──────────────────────────────────────────┘
+                │ ZMQ (All Data: 5557)
+                ▼
+┌─ VIEWER PROCESS (Laptop) ────────────────────────────────┐
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  ZMQ Subscriber (connects to broker:5557)          │  │
+│  │  • Receives video frames (JPEG compressed)         │  │
+│  │  • Receives lane detection results                 │  │
+│  │  • Receives vehicle status (speed, position, etc)  │  │
+│  └─────────────────┬──────────────────────────────────┘  │
+│                    ▼                                      │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  Overlay Renderer (runs on laptop!)                │  │
+│  │  • Draws lane lines on frame                       │  │
+│  │  • Renders HUD with vehicle telemetry              │  │
+│  │  • Generates MJPEG stream for browser              │  │
+│  └─────────────────┬──────────────────────────────────┘  │
+│                    ▼                                      │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  HTTP Server (localhost:8080)                      │  │
+│  │  • Serves HTML/CSS/JavaScript                      │  │
+│  │  • Streams MJPEG video (/stream endpoint)          │  │
+│  │  • Handles actions POST (/action endpoint)         │  │
+│  │  • Handles parameters POST (/parameter endpoint)   │  │
+│  └─────────────────┬──────────────────────────────────┘  │
+│                    │                                      │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │  ZMQ Publishers (send to broker)                   │  │
+│  │  • Actions (pause/resume/respawn) → port 5558      │  │
+│  │  • Parameters (Kp, Kd, thresholds) → port 5559     │  │
+│  └────────────────────────────────────────────────────┘  │
+└────────────────────┬──────────────────────────────────────┘
+                     │ HTTP
+                     ▼
+            ┌────────────────┐
+            │    Browser     │
+            │  localhost:8080│
+            │  • Video stream│
+            │  • Controls    │
+            │  • Parameters  │
+            └────────────────┘
 ```
+
+**Key Points:**
+- **Rendering on laptop**: Heavy drawing operations don't impact vehicle
+- **Centralized broker**: LKAS broker handles all routing and broadcasting
+- **Separate processes**: Viewer, LKAS, and simulation run independently
+- **Network capable**: Works over local network or WiFi
 
 ## Features
 
@@ -159,19 +205,28 @@ simulation --viewer none
 ### Problem: Blank page in browser
 
 **Solutions:**
-- Check if simulation is running: `ps aux | grep simulation`
+- Check if viewer is running: `ps aux | grep viewer`
+- Check if LKAS broker is running: `ps aux | grep "lkas.*broadcast"`
 - Verify web port is accessible: `curl http://localhost:8080`
-- Try different port (CLI override): `simulation --web-port 8081`
-- Or change port in config.yaml: `visualization.web_port: 8081`
+- Try different port: `viewer --port 8081`
 - Check browser console for errors (F12)
 
 ### Problem: No video stream
 
 **Solutions:**
-- Ensure CARLA camera is active
-- Check simulation terminal for errors
-- Verify detection/decision modules are running
-- Restart simulation
+- Ensure LKAS is running with `--broadcast` flag: `lkas --method cv --broadcast`
+- Ensure simulation is running with `--broadcast` flag: `simulation --broadcast`
+- Check LKAS terminal for "Broadcasting" messages
+- Verify ZMQ connection in viewer logs
+- Restart all processes in order: CARLA → LKAS → Simulation → Viewer
+
+### Problem: Controls don't work (pause/resume/respawn)
+
+**Solutions:**
+- Check LKAS broker is receiving actions (look for "[Broker] Action received" logs)
+- Ensure simulation is connected to LKAS broker (port 5561)
+- Verify viewer can reach LKAS broker (port 5558)
+- Check browser console for network errors
 
 ### Problem: Slow/laggy video
 
@@ -181,13 +236,13 @@ simulation --viewer none
 - Check CARLA server performance
 - Use headless mode if visualization not needed
 
-### Problem: Controls not working
+### Problem: Parameter changes don't take effect
 
 **Solutions:**
-- Ensure JavaScript is enabled in browser
-- Check browser console for errors
-- Verify keyboard focus is on browser window
-- Refresh the page (F5)
+- Ensure LKAS is running with `--broadcast` flag (enables parameter broker)
+- Check LKAS broker is forwarding parameters (look for "[Broker] Parameter forwarded" logs)
+- Verify detection/decision servers are subscribed to parameter updates
+- Parameters update immediately - no need to restart
 
 ## Development
 
@@ -212,19 +267,24 @@ visualized_frame = visualizer.draw_lanes(frame, detection_result)
 visualized_frame = draw_custom_info(visualized_frame, my_data)
 ```
 
-### Web Viewer Technology
+### Technology Stack
 
-The web viewer uses:
-- **Flask** - Web server framework
+- **ZMQ (ØMQ)** - High-performance messaging for vehicle data
+- **HTTP Server** - Threaded server for web interface
 - **MJPEG streaming** - Real-time video to browser
-- **HTML5/JavaScript** - Interactive UI
-- **OpenCV** - Frame rendering and overlay drawing
+- **HTML5/JavaScript** - Interactive UI with live controls
+- **OpenCV** - Frame decoding and overlay rendering (on laptop!)
 
-### Files
+### ZMQ Topics
 
-- `run.py` - Web viewer entry point
-- `__init__.py` - Package exports
-- `README.md` - This documentation
+**Subscribed (from LKAS broker:5557):**
+- `frame` - JPEG-compressed video frames
+- `detection` - Lane detection results (left/right lanes)
+- `state` - Vehicle status (speed, steering, position, etc.)
+
+**Published:**
+- `action` (to port 5558) - User commands (pause, resume, respawn)
+- `parameter` (to port 5559) - Real-time parameter updates
 
 ## See Also
 

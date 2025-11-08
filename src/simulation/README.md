@@ -8,7 +8,8 @@ The simulation module integrates with CARLA simulator to provide:
 - Vehicle spawning and control
 - Camera sensor management
 - LKAS module coordination via shared memory
-- Real-time visualization (web, OpenCV, Pygame)
+- ZMQ-based vehicle status broadcasting to LKAS broker
+- Remote action handling (pause/resume/respawn)
 - Performance metrics and logging
 
 ## Features
@@ -23,13 +24,13 @@ The simulation module integrates with CARLA simulator to provide:
   - Detection client for lane detection results
   - Decision client for steering commands
   - Shared memory-based IPC for low latency
-  - Automatic process lifecycle management
+  - ZMQ-based vehicle status publishing to LKAS broker
+  - Action subscription from LKAS broker (pause/resume/respawn)
 
-- **Visualization Options**:
-  - Web viewer (no X11 required, works in Docker)
-  - OpenCV window viewer
-  - Pygame viewer
-  - Headless mode for deployment
+- **Remote Viewer Support**:
+  - Publishes vehicle status to LKAS broker (port 5562)
+  - Receives actions from LKAS broker (port 5561)
+  - LKAS broker handles all viewer communication and data broadcasting
 
 - **Performance Monitoring**:
   - Real-time FPS tracking
@@ -82,13 +83,16 @@ simulation/
 # Terminal 1: Start CARLA
 ./CarlaUE4.sh
 
-# Terminal 2: Start simulation with integrated LKAS
-lkas --method cv --viewer web
+# Terminal 2: Start LKAS with ZMQ broker for viewer support
+lkas --method cv --broadcast
 
-# Or start simulation alone (requires separate LKAS servers)
-simulation --viewer web
+# Terminal 3: Start simulation with broadcast enabled
+simulation --broadcast
 
-# Note: Web port defaults to 8080 from config.yaml
+# Terminal 4: Start web viewer (optional)
+viewer
+
+# The viewer will show vehicle status, lane detection, and interactive controls
 ```
 
 ### Command Line Options
@@ -99,43 +103,43 @@ simulation --help
 Options:
   --host HOST              CARLA server host (overrides config, default: from config.yaml)
   --port PORT              CARLA server port (overrides config, default: from config.yaml)
-  --viewer {web,opencv,pygame,none}  Visualization mode (default: web)
-  --web-port PORT          Web viewer port (overrides config, default: from config.yaml)
+  --spawn-point N          Spawn vehicle at specific point (default: random)
   --config PATH            Path to config file (default: auto-detected)
-  --timeout SECONDS        CARLA connection timeout (default: 10.0)
+  --broadcast              Enable ZMQ broadcasting to LKAS broker (for viewer support)
+  --autopilot              Enable CARLA autopilot
+  --no-sync                Disable synchronous mode
+  --verbose                Enable verbose output
 ```
 
 ### Examples
 
-**Web viewer (recommended, no X11 required)**:
+**Standard mode with viewer support** (recommended):
 ```bash
-# Uses port from config.yaml (default: 8080)
-simulation --viewer web
+# Enable broadcasting to LKAS broker for web viewer
+simulation --broadcast
 
-# Override port from command line
-simulation --viewer web --web-port 8081
-
-# Open http://localhost:8080 in browser (or your custom port)
-```
-
-**OpenCV window viewer**:
-```bash
-simulation --viewer opencv
-```
-
-**Headless mode** (no visualization):
-```bash
-simulation --viewer none
+# In another terminal, start the viewer
+viewer
 ```
 
 **Remote CARLA server**:
 ```bash
-simulation --host 192.168.1.100 --port 2000 --viewer web
+simulation --host 192.168.1.100 --port 2000 --broadcast
+```
+
+**Custom spawn point**:
+```bash
+simulation --spawn-point 5 --broadcast
+```
+
+**Verbose output**:
+```bash
+simulation --broadcast --verbose
 ```
 
 **Custom configuration**:
 ```bash
-simulation --config /path/to/custom-config.yaml --viewer web
+simulation --config /path/to/custom-config.yaml --broadcast
 ```
 
 ## Programming API
@@ -222,26 +226,46 @@ if steering_msg:
          ▼                                    ▼
 ┌─────────────────────────────────────────────────────┐
 │           Simulation Orchestrator                   │
-│  • Reads detections via DetectionClient             │
-│  • Reads steering via DecisionClient                │
+│  • Reads detections via shared memory               │
+│  • Reads steering via shared memory                 │
 │  • Applies control to CARLA vehicle                 │
-│  • Manages visualization                            │
+│  • Publishes vehicle status to LKAS broker (ZMQ)    │
+│  • Receives actions from LKAS broker (ZMQ)          │
+└─────────────────────────────────────────────────────┘
+         │                                    │
+         │ Vehicle Status (5562)              │ Actions (5561)
+         ▼                                    ▼
+┌─────────────────────────────────────────────────────┐
+│              LKAS ZMQ Broker                        │
+│  • Routes vehicle status to viewers                 │
+│  • Routes actions to simulation                     │
+│  • Broadcasts frames and detection data             │
+└─────────────────────────────────────────────────────┘
+         │
+         │ All data (5557)
+         ▼
+┌─────────────────────────────────────────────────────┐
+│              Web Viewer                             │
+│  • Displays video stream with lane overlays        │
+│  • Shows vehicle status (speed, position)           │
+│  • Interactive controls (pause/resume/respawn)      │
 └─────────────────────────────────────────────────────┘
 ```
 
-### Shared Memory Communication
+### Communication Architecture
 
-The simulation module uses shared memory for ultra-low latency IPC:
-
-- **Detection Channel**: Receives lane detection results (left/right lanes)
-- **Decision Channel**: Receives steering commands from decision module
+**Shared Memory (Low Latency IPC):**
 - **Image Channel**: Sends camera images to detection module
+- **Detection Channel**: Receives lane detection results
+- **Control Channel**: Receives steering commands from decision module
+- Benefits: ~0.1ms latency, zero-copy transfer
 
-**Benefits:**
-- ~0.1ms latency (vs ~5-10ms for ZMQ)
-- No network overhead
-- Zero-copy data transfer
-- Process isolation maintained
+**ZMQ (Remote Viewer Support):**
+- **Vehicle Status Publisher** (Port 5562): Sends vehicle state to LKAS broker
+  - Data: steering, throttle, brake, speed, position, rotation, pause state
+- **Action Subscriber** (Port 5561): Receives actions from LKAS broker
+  - Actions: pause, resume, respawn
+- Benefits: Network-capable, multiple subscribers, fire-and-forget
 
 ## Configuration
 
@@ -279,13 +303,16 @@ camera:
 
 ```yaml
 visualization:
-  web_port: 8080              # Web viewer port (default: 8080)
+  web_port: 8080              # Web viewer port (runs separately)
   show_spectator_overlay: true
   follow_with_spectator: false
   show_hud: true
   show_steering: true
   fill_lane: true
   enable_alerts: true
+
+# Note: Web viewer now runs as separate process via 'viewer' command
+# It connects to LKAS broker which receives data from simulation
 ```
 
 ### Performance Settings
