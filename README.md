@@ -1,105 +1,555 @@
-# ADS Project - Lane Keeping Assist - Level 1 Autonomy ADAS feature  
-## Your lane, your pace!
-</br>
+# Autonomous Driving Skynet - Lane Keeping System
 
+**Real-time lane keeping assist system with WebSocket-powered monitoring and live parameter tuning for CARLA simulator.**
 
-- [ADS Project - Lane Keeping Assist - Level 1 Autonomy ADAS feature](#ads-project---lane-keeping-assist---level-1-autonomy-adas-feature)
-  - [Introduction](#introduction)
-  - [Background Information](#background-information)
-  - [Objectives](#objectives)
-  - [Mandatory Part](#mandatory-part)
-  - [Common Instructions](#common-instructions)
-  - [Skills](#skills)
-  - [Evaluation](#evaluation)
-  - [Submission](#submission)
+## 🌟 Features
 
-</br>
+- **🚀 WebSocket Real-Time Streaming** - Binary frame transmission with 50-300ms latency
+- **🎮 Live Parameter Tuning** - Adjust detection and PID parameters on-the-fly
+- **📡 ZMQ Broker Architecture** - Distributed communication between modules
+- **🔄 Multiple Detection Methods** - OpenCV (CV), YOLO, YOLO-Seg
+- **🎯 PID Controller** - Smooth steering with configurable gains
+- **🌐 Remote Web Viewer** - Monitor from any browser, no X11 required
+- **⚡ Low Latency** - Optimized performance with frame rate limiting
+- **🔧 Production Ready** - Process isolation, fault tolerance, comprehensive logging
 
+## 📦 Installation
 
-## Introduction
+### Prerequisites
+- Python 3.10+
+- CARLA 0.9.15+ simulator
+- GPU (optional, for YOLO detection)
 
-In this project, you will be exposed to the intersection of virtual simulations and real-world applications. You will delve deep into the mechanisms of the Lane Keeping Assist System (LKA), a pivotal Level 1 autonomous driving feature. Using advanced simulation platforms and actual hardware, you will design, test, and implement an LKAS that can operate both virtually and in the real world. 
-</br>
+### Quick Install
 
+```bash
+# Clone repository
+git clone <repository-url>
+cd ads_skynet
 
-## Background Information
+# Install package with all dependencies
+pip install -e .
 
-The dream of self-driving cars has been around for decades, long before they became a technical reality. From the early radio-controlled cars showcased in the 1930s World's Fair to the futuristic vehicles in science fiction, autonomous driving has always captured human imagination. The Lane Keeping Assist System is one of the first steps in making this dream come true. It's not just a technical marvel; LKAS plays a crucial role in ensuring safer roads by reducing lane departure incidents.  
-</br>
+# Verify installation
+lkas --help
+simulation --help
+viewer --help
+```
 
+This installs the `ads-skynet` package with three main entry points:
+- `lkas` - Lane Keeping Assist System (detection + decision + broker)
+- `simulation` - CARLA simulation orchestrator
+- `viewer` - WebSocket-powered web viewer
 
-## Objectives
+## 🚀 Quick Start
 
-1. Design a virtual LKAS capable of detecting and tracking lane markings using simulated sensors.
-2. Implement feedback mechanisms to alert virtual drivers of unintentional lane departures.
-3. Simulate corrective interventions, such as steering or braking adjustments, to ensure the virtual vehicle remains in its lane.
-4. Translate the virtual LKAS system to a real-world application using the PiRacer, ensuring it operates effectively with real sensors and environments.
+### Full System Setup
 
-</br>
+```bash
+# Terminal 1: Start CARLA simulator
+cd ~/carla
+./CarlaUE4.sh
 
+# Terminal 2: Start LKAS (detection + decision + ZMQ broker)
+cd ~/ads_skynet
+lkas --method cv --broadcast
 
-## Mandatory Part
+# Terminal 3: Start simulation (connects to LKAS via ZMQ)
+simulation --broadcast
 
-1. Establish a comprehensive simulation environment using platforms like CARLA or Gazebo. This setup should include a detailed test track and a vehicle embedded with all necessary simulated sensors.
-2. Develop algorithms to identify lane markings and determine the vehicle's position relative to them.
-3. Implement a feedback system to alert the driver if the vehicle drifts from its lane, using both visual and auditory signals.
-4. Create interventions in the simulation to redirect the vehicle back to its lane.
-5. Transition from simulation to real-world application by setting up the LKAS on the PiRacer. Integrate necessary sensors and calibrate them to function in real environments.
+# Terminal 4: Start web viewer (optional, for monitoring)
+viewer
 
-</br>
+# Open browser: http://localhost:8080
+```
 
-## Common Instructions
+### What You'll See
 
-- Always backup your data and code before making major changes.
-- When transitioning to real-world testing, always test in controlled environments, ensuring all interventions are gradual and predictable to prevent abrupt movements or potential damage.
-- Wear appropriate safety gear when working with hardware components.
+**Web Viewer Dashboard:**
+- 🎥 Live video stream with lane overlays
+- 📊 Real-time FPS and latency metrics
+- 🎛️ Interactive parameter sliders
+- 🔘 Control buttons (Pause/Resume/Respawn)
+- 🟢 Connection status indicator
 
-</br>
+## 🏗️ Architecture
 
-## Skills
+### System Overview
 
-- Proficiency in simulation platforms such as CARLA or Gazebo.
-- Understanding of sensor data processing and algorithmic design for lane detection.
-- Integration skills, transitioning from a virtual to a real-world system.
-- Calibration and testing skills for real-world hardware systems.
-- Proficiency in ML and DL algorithms
-- Proficiency in Linear Algebra
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CARLA Simulator                          │
+│                     (UE4 Engine)                            │
+└──────────────┬──────────────────────────┬───────────────────┘
+               │                          │
+         Camera Frames             Vehicle Control
+               │                          │
+┌──────────────┴──────────────────────────┴───────────────────┐
+│              Simulation Orchestrator                        │
+│  • Spawns vehicle & camera                                  │
+│  • Sends frames to LKAS (ZMQ port 5560)                     │
+│  • Receives steering from LKAS (ZMQ port 5563)              │
+│  • Publishes status to LKAS Broker (ZMQ port 5562)         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+              ZMQ Communication (ports 5560-5563)
+                          │
+┌─────────────────────────┴───────────────────────────────────┐
+│                   LKAS Module (ZMQ Broker)                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   │
+│  │  Detection   │→  │   Decision   │→  │   Actuator   │   │
+│  │   (Vision)   │   │    (PID)     │   │  (Steering)  │   │
+│  └──────────────┘   └──────────────┘   └──────────────┘   │
+│         │                                       │           │
+│         └───────────────┬───────────────────────┘           │
+│                         │                                   │
+│                   ZMQ Broker Hub                            │
+│              (Coordinates all modules)                      │
+│                                                             │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+          ZMQ Broadcasting (ports 5557-5559)
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                 │                 │
+    Frames           Actions          Parameters
+  (port 5557)     (port 5558)      (port 5559)
+        │                 │                 │
+┌───────┴─────────────────┴─────────────────┴─────────────────┐
+│                   Viewer Process                            │
+│  • Receives data via ZMQ                                    │
+│  • Renders overlays on laptop                               │
+│  • Serves WebSocket (binary frames, ~50-100ms latency)     │
+│  • HTTP server (port 8080) + WebSocket (port 8081)         │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                    WebSocket
+                  (Binary JPEG Frames)
+                          │
+              ┌───────────┴───────────┐
+              │   Web Browser         │
+              │  (localhost:8080)     │
+              │  • Live video         │
+              │  • Parameter tuning   │
+              │  • Control buttons    │
+              └───────────────────────┘
+```
 
-</br>
+### Data Flow
 
+1. **CARLA** → Camera frames → **Simulation**
+2. **Simulation** → Frames via ZMQ → **LKAS Detection**
+3. **LKAS Detection** → Lane data → **LKAS Decision**
+4. **LKAS Decision** → Steering commands → **Simulation**
+5. **Simulation** → Vehicle control → **CARLA**
+6. **LKAS Broker** → Broadcasts all data → **Viewer**
+7. **Viewer** → WebSocket binary frames → **Browser**
+8. **Browser** → Actions/Parameters → **Viewer** → **LKAS Broker**
 
-## Evaluation
-In this project, every team must host ONE final submission demo & presentation (max. 30 mins) in front of all the other teams. Each team must find a way to organize this presentation making sure that all the other teams can be present and participate actively (Please work out what date/time works the best for every team). The date and time of each team's presentation must be communicated to staff well in advance (at least a week in advance). It is presenting team's responsibility to make sure that all the forms are filled in **immediately** after the presentation.
+## 📁 Project Structure
 
-This project has two evaluation forms:
-1. For evaluators (the audience) - Fill in [this form](https://docs.google.com/forms/d/e/1FAIpQLSe7AKrza228fzdDNgevTw4Gsz-ARlWcbtQmXn8JAEYaj24mzw/viewform?usp=sf_link) to evaluate the presenting team's final project submission
-2. For evaluatee (the presentor) - Fill in [this form](https://docs.google.com/forms/d/e/1FAIpQLSfYipLAaXFaAm23ZdW8ruXCfQDOXikLYwhxXwpve9C5kZoZvw/viewform?usp=sf_link) for general feedback on your workings on this project.
+```
+ads_skynet/
+├── pyproject.toml              # Package configuration & dependencies
+├── config.yaml                 # System configuration (auto-loaded)
+├── README.md                   # This file
+│
+├── src/
+│   ├── lkas/                   # Lane Keeping Assist System
+│   │   ├── run.py              # Main LKAS entry point
+│   │   ├── orchestrator.py     # LKAS pipeline coordinator
+│   │   │
+│   │   ├── detection/          # Lane detection (CV, YOLO)
+│   │   │   ├── core/
+│   │   │   │   ├── detector.py       # Detection interface
+│   │   │   │   ├── config.py         # Configuration management
+│   │   │   │   └── models.py         # Lane data models
+│   │   │   ├── cv/                   # OpenCV detector
+│   │   │   ├── yolo/                 # YOLO detector
+│   │   │   └── preprocessing/        # ROI masking, etc.
+│   │   │
+│   │   ├── decision/           # Steering control
+│   │   │   ├── controller.py   # PID controller
+│   │   │   └── metrics.py      # Control metrics
+│   │   │
+│   │   └── integration/        # Communication
+│   │       └── zmq/            # ZMQ broker & messaging
+│   │           ├── broker.py         # Main ZMQ broker
+│   │           ├── broadcaster.py    # Data broadcasting
+│   │           └── messages.py       # Message protocols
+│   │
+│   ├── simulation/             # CARLA Simulation
+│   │   ├── run.py              # Simulation entry point
+│   │   ├── orchestrator.py     # System coordinator
+│   │   │
+│   │   ├── carla_api/          # CARLA interface
+│   │   │   ├── connection.py   # CARLA connection
+│   │   │   ├── vehicle.py      # Vehicle control
+│   │   │   └── camera.py       # Camera sensors
+│   │   │
+│   │   ├── integration/        # LKAS integration
+│   │   │   └── zmq_broadcast.py      # ZMQ publishers/subscribers
+│   │   │
+│   │   └── utils/              # Utilities
+│   │       └── visualizer.py   # Overlay rendering
+│   │
+│   └── viewer/                 # WebSocket Web Viewer
+│       ├── run.py              # Viewer entry point
+│       ├── frontend.html       # Web interface (HTML/CSS/JS)
+│       ├── test_websocket.py   # WebSocket testing tool
+│       └── README.md           # Viewer documentation
+│
+└── docs/                       # Additional documentation
+```
 
-</br>
+## 🎯 Module Responsibilities
 
-## Submission
+### LKAS Module (`src/lkas/`)
+- **Detection:** Processes camera frames, detects lane markings
+- **Decision:** Analyzes lanes, computes steering via PID controller
+- **ZMQ Broker:** Coordinates all communication between modules
+- **Broadcasting:** Publishes data to viewer for monitoring
 
-1. Code: The source code of the project, including all necessary files and libraries. The code should be well-documented, readable, and organized in a logical manner.
-2. Technical documentation: Detailed technical documentation that provides an overview of the project, including the background information, goals, objectives, technical requirements, software architecture, and design.
-3. Test results: Detailed test results that demonstrate the performance and accuracy of the autonomous lane detection system. This should include test data and results, as well as any graphs or visualizations that help to show the performance of the system.
-4. User manual: A comprehensive user manual that provides instructions on how to use the autonomous vehicle, including how to set up the sensors and other components, how to control the vehicle, and how to monitor its performance.
-5. Presentation: A presentation that summarizes the project and highlights the key results and contributions of the students. This presentation can be in the form of a slide deck, video, or other format as appropriate.
-6. Final report: A final report that summarizes the project and provides a detailed overview of the work that was completed, the results achieved, and the challenges encountered. The report should also include a discussion of future work that could be done to extend or improve the autonomous lane detection system.
+**Entry point:** `lkas --method cv --broadcast`
 
-</br>
+### Simulation Module (`src/simulation/`)
+- **CARLA Integration:** Connects to simulator, spawns vehicle
+- **Camera Management:** Sets up sensors, captures frames
+- **ZMQ Communication:** Sends frames to LKAS, receives steering
+- **Status Publishing:** Broadcasts vehicle telemetry
 
+**Entry point:** `simulation --broadcast`
 
-# References
+### Viewer Module (`src/viewer/`)
+- **ZMQ Subscription:** Receives data from LKAS broker
+- **Rendering:** Draws lane overlays and HUD on laptop
+- **WebSocket Server:** Streams binary frames to browser
+- **Web Interface:** Provides monitoring and control dashboard
 
-Here are some open source references and descriptions that could be used in the Road Surface Segmentation using PiRacer project:
+**Entry point:** `viewer`
 
-1. OpenCV: OpenCV is a popular open-source computer vision library that provides a wide range of tools and algorithms for image and video processing. Participants could use OpenCV for pre-processing the video footage, extracting features, and identifying the lane markings.
-    Link: [https://opencv.org/](https://opencv.org/)
+## ⚙️ Configuration
 
-2. TensorFlow: TensorFlow is an open-source machine learning framework that provides a wide range of tools for training deep neural networks. Participants could use TensorFlow for training a deep neural network for identifying extracted lane markings.
-    Link: https://www.tensorflow.org/
+### config.yaml
 
+The system loads `config.yaml` from the project root:
 
+```yaml
+# CARLA Connection
+carla:
+  host: localhost
+  port: 2000
+  timeout: 10.0
 
+  vehicle:
+    model: vehicle.tesla.model3
+    spawn_point: 0  # or null for random
 
-These references are just examples and participants are encouraged to explore other open-source tools and resources that may be more suitable for their specific needs and requirements. Participants should be prepared to research and evaluate different open-source tools and resources, and to make informed decisions about which tools and resources to use for their projects.
+  camera:
+    width: 640
+    height: 480
+    fov: 110
+
+# Detection Parameters
+detection:
+  method: cv  # cv, yolo, yolo-seg
+  cv:
+    canny_low: 50
+    canny_high: 150
+    hough_threshold: 50
+    hough_min_line_len: 40
+    smoothing_factor: 0.7
+
+# PID Control Parameters
+decision:
+  kp: 0.5             # Proportional gain
+  kd: 0.1             # Derivative gain
+  throttle_base: 0.14
+  throttle_min: 0.05
+  steer_threshold: 0.15
+
+# ZMQ Ports
+zmq:
+  # LKAS Broker ports
+  broker:
+    detection_input_port: 5560    # Receive frames from sim
+    decision_output_port: 5563    # Send steering to sim
+    viewer_data_port: 5557        # Broadcast to viewer
+    viewer_action_port: 5558      # Receive actions from viewer
+    parameter_update_port: 5559   # Receive parameters from viewer
+
+  # Simulation ports
+  simulation:
+    detection_output_port: 5560   # Send frames to LKAS
+    decision_input_port: 5563     # Receive steering from LKAS
+    status_publish_port: 5562     # Publish status to broker
+
+# Viewer Configuration
+visualization:
+  web_port: 8080  # HTTP server (WebSocket will be port+1)
+```
+
+### Custom Configuration
+
+```bash
+# Use project root config.yaml (default)
+lkas --method cv --broadcast
+
+# Use custom config
+lkas --config /path/to/custom-config.yaml --method cv --broadcast
+
+# Override specific settings
+simulation --broadcast --spawn-id 123
+viewer --port 9090
+```
+
+## 🎮 Web Interface Features
+
+### Live Video Stream
+- Real-time lane detection overlays
+- Vehicle telemetry HUD (speed, steering, position)
+- FPS and latency monitoring
+- Connection status indicator
+
+### Interactive Controls
+- **🔄 Respawn Vehicle** - Reset to spawn point
+- **⏸ Pause / ▶ Resume** - Control simulation
+- **Keyboard:** `R` for respawn, `Space` for pause/resume
+
+### Live Parameter Tuning
+
+**Detection Parameters (adjustable in real-time):**
+- Canny Low Threshold (1-150)
+- Canny High Threshold (50-255)
+- Hough Threshold (1-150)
+- Hough Min Line Length (10-150)
+- Smoothing Factor (0-1)
+
+**Decision Parameters (PID tuning):**
+- Kp - Proportional gain (0-2)
+- Kd - Derivative gain (0-1)
+- Base Throttle (0-0.5)
+- Min Throttle (0-0.2)
+- Steer Threshold (0-0.5)
+
+**All changes apply instantly without restarting!**
+
+## 📊 Performance
+
+### Typical Latencies
+- **CARLA → Simulation:** ~5ms
+- **Simulation → LKAS:** ~5-10ms (ZMQ)
+- **LKAS Detection:** 5-15ms (CV), 20-40ms (YOLO)
+- **LKAS Decision:** <1ms
+- **LKAS → Simulation:** ~5-10ms (ZMQ)
+- **LKAS → Viewer:** ~5ms (ZMQ)
+- **Viewer → Browser:** 50-100ms (WebSocket + rendering)
+- **End-to-End (CARLA → Browser):** ~100-200ms
+
+### Optimization Tips
+
+1. **Reduce camera resolution:**
+   ```yaml
+   camera:
+     width: 640
+     height: 480
+   ```
+
+2. **Adjust WebSocket frame rate:**
+   ```python
+   # In viewer/run.py
+   self.ws_frame_interval = 1.0 / 30.0  # 30 FPS (default)
+   ```
+
+3. **Lower JPEG quality:**
+   ```python
+   # In viewer/run.py
+   cv2.imencode('.jpg', ..., [cv2.IMWRITE_JPEG_QUALITY, 70])
+   ```
+
+4. **Use OpenCV for detection:**
+   ```bash
+   lkas --method cv  # Faster than YOLO
+   ```
+
+## 🔧 Development
+
+### Testing WebSocket Connection
+
+```bash
+# Terminal 1: Start viewer
+viewer
+
+# Terminal 2: Test WebSocket
+python3 src/viewer/test_websocket.py
+
+# Expected output:
+# ✓ Connected to ws://localhost:8081
+# ✓ Sent test message
+# ✓ Received frame (binary)
+# ✓ Received status (JSON)
+```
+
+### Debugging
+
+**Enable verbose logging:**
+```bash
+lkas --method cv --broadcast --verbose
+simulation --broadcast --verbose
+viewer --verbose
+```
+
+**Check ZMQ ports:**
+```bash
+ss -tlnp | grep '555[7-9]\|556[0-3]'
+```
+
+**Monitor WebSocket:**
+```bash
+# Check WebSocket server
+ss -tlnp | grep 8081
+
+# Browser console (F12)
+# Check connection status and frame reception
+```
+
+### Adding Custom Detection Method
+
+```python
+# In lkas/detection/<method>/detector.py
+from lkas.detection.core.detector import LaneDetector
+
+class MyDetector(LaneDetector):
+    def detect(self, image):
+        # Your detection logic
+        left_lane = (x1, y1, x2, y2)
+        right_lane = (x1, y1, x2, y2)
+        return left_lane, right_lane
+
+# Register in lkas/detection/core/detector.py
+DETECTORS = {
+    'cv': CVDetector,
+    'yolo': YOLODetector,
+    'my_method': MyDetector,
+}
+
+# Use it
+lkas --method my_method --broadcast
+```
+
+## 🐛 Troubleshooting
+
+### CARLA Connection Failed
+```
+Error: Could not connect to CARLA
+```
+**Fix:**
+- Ensure CARLA is running: `./CarlaUE4.sh`
+- Check host/port in config.yaml
+- Verify firewall settings
+
+### WebSocket Not Connecting
+```
+Connection: Disconnected (red)
+```
+**Fix:**
+```bash
+# Check viewer is running
+ps aux | grep viewer
+
+# Verify WebSocket server started
+# Should see: ✓ WebSocket server started on port 8081
+
+# Test connection
+python3 src/viewer/test_websocket.py
+
+# Check firewall
+sudo ufw allow 8081
+```
+
+### High Latency (>1 second)
+```
+Latency: 5000+ms
+```
+**Fix:**
+- Reduce JPEG quality (viewer/run.py, line ~290)
+- Lower camera resolution (config.yaml)
+- Reduce frame rate limit (viewer/run.py, line ~104)
+
+### Parameters Not Updating
+```
+Slider moves but behavior doesn't change
+```
+**Fix:**
+- Check LKAS is running with `--broadcast` flag
+- Verify parameter port: `ss -tlnp | grep 5559`
+- Check browser console for errors
+
+## 📚 Documentation
+
+Detailed documentation for each module:
+
+| Module | Documentation |
+|--------|---------------|
+| **LKAS** | [src/lkas/README.md](src/lkas/README.md) |
+| **Simulation** | [src/simulation/README.md](src/simulation/README.md) |
+| **Viewer** | [src/viewer/README.md](src/viewer/README.md) |
+
+## 🎓 Key Technologies
+
+- **CARLA Simulator** - Realistic autonomous driving environment
+- **OpenCV** - Computer vision for lane detection
+- **ZMQ (ZeroMQ)** - High-performance distributed messaging
+- **WebSocket** - Real-time bidirectional browser communication
+- **Python asyncio** - Asynchronous WebSocket server
+- **PID Controller** - Smooth vehicle steering control
+
+## 🏆 Highlights
+
+### WebSocket Improvements
+- ✅ **Binary frames** - No base64 overhead (33% size reduction!)
+- ✅ **Frame rate limiting** - 30 FPS max prevents flooding
+- ✅ **Instant reconnection** - Auto-reconnect on disconnect
+- ✅ **Low latency** - ~50-100ms browser latency
+- ✅ **Efficient encoding** - JPEG quality balanced for speed
+
+### Architecture Benefits
+- ✅ **Modular design** - Clean separation of concerns
+- ✅ **Process isolation** - Independent module lifecycles
+- ✅ **ZMQ broker** - Centralized communication hub
+- ✅ **Distributed ready** - Run modules on different machines
+- ✅ **Live tuning** - Adjust parameters without restart
+
+### Production Ready
+- ✅ **Error handling** - Graceful degradation
+- ✅ **Comprehensive logging** - Detailed diagnostics
+- ✅ **Performance monitoring** - Real-time metrics
+- ✅ **Fault tolerance** - Auto-reconnection and retry logic
+- ✅ **Testing tools** - WebSocket test client included
+
+## 📦 Package Information
+
+- **Name:** `ads-skynet`
+- **Version:** 0.1.0
+- **Python:** 3.10+
+- **License:** See LICENSE file
+
+## 🚀 Getting Started
+
+Ready to run? Follow the [Quick Start](#-quick-start) guide above!
+
+**New to the project?** Start with these steps:
+1. Install package: `pip install -e .`
+2. Start CARLA: `./CarlaUE4.sh`
+3. Start LKAS: `lkas --method cv --broadcast`
+4. Start simulation: `simulation --broadcast`
+5. Start viewer: `viewer`
+6. Open browser: http://localhost:8080
+
+**Questions?** Check the [Troubleshooting](#-troubleshooting) section or module-specific READMEs.
+
+---
+
+**Built with ❤️ for autonomous driving education and research**
