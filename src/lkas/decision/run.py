@@ -78,7 +78,9 @@ class DecisionServer:
             image_width=config.camera.width,
             image_height=config.camera.height,
             kp=config.controller.kp,
+            ki=config.controller.ki,
             kd=config.controller.kd,
+            controller_method=config.controller_method,
             throttle_policy={
                 "base": config.throttle_policy.base,
                 "min": config.throttle_policy.min,
@@ -86,8 +88,11 @@ class DecisionServer:
                 "steer_max": config.throttle_policy.steer_max,
             },
         )
-        print(f"✓ Decision controller ready")
-        print(f"  PD Gains: Kp={config.controller.kp}, Kd={config.controller.kd}")
+        print(f"✓ Decision controller ready ({config.controller_method.upper()})")
+        if config.controller_method == "pid":
+            print(f"  PID Gains: Kp={config.controller.kp}, Ki={config.controller.ki}, Kd={config.controller.kd}")
+        else:
+            print(f"  PD Gains: Kp={config.controller.kp}, Kd={config.controller.kd}")
         print(f"  Throttle: base={config.throttle_policy.base}, min={config.throttle_policy.min}")
 
         # Connect to detection shared memory (reader)

@@ -62,8 +62,9 @@ lane_analyzer:
   max_heading_degrees: 30.0  # Maximum heading angle
 
   # Steering controller gains
-  kp: 0.5  # Proportional gain
-  kd: 0.1  # Derivative gain
+  kp: 0.5   # Proportional gain
+  ki: 0.01  # Integral gain (for PID controller)
+  kd: 0.1   # Derivative gain
 
 # Throttle Control Policy
 # Adaptive throttle reduces speed during sharp turns to prevent overshooting
@@ -105,7 +106,8 @@ visualization:
 
 # System
 system:
-  detection_method: "cv"  # "cv" or "dl"
+  detection_method: "cv"   # "cv" or "dl"
+  controller_method: "pd"  # "pd" or "pid"
   target_fps: 30
   enable_logging: true
   log_file: "lkas.log"

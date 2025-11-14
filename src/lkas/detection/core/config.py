@@ -91,9 +91,10 @@ class AnalyzerConfig:
 
 @dataclass
 class ControllerConfig:
-    """PD controller parameters."""
-    kp: float = 0.5  # Proportional gain
-    kd: float = 0.1  # Derivative gain
+    """PD/PID controller parameters."""
+    kp: float = 0.5   # Proportional gain
+    ki: float = 0.01  # Integral gain (for PID)
+    kd: float = 0.1   # Derivative gain
 
 
 @dataclass
@@ -147,6 +148,7 @@ class Config:
 
     # General settings
     detection_method: str = "cv"  # 'cv' or 'dl'
+    controller_method: str = "pd"  # 'pd' or 'pid'
 
 
 class ConfigManager:
@@ -292,6 +294,7 @@ class ConfigManager:
                 ctrl_data = data['lane_analyzer']
                 controller_cfg = ControllerConfig(
                     kp=ctrl_data.get('kp', controller_cfg.kp),
+                    ki=ctrl_data.get('ki', controller_cfg.ki),
                     kd=ctrl_data.get('kd', controller_cfg.kd),
                 )
 
@@ -332,10 +335,12 @@ class ConfigManager:
                     hud_margin=viz_data.get('hud_margin', viz_cfg.hud_margin),
                 )
 
-            # Parse detection method from system section
+            # Parse detection and controller methods from system section
             detection_method = "cv"
+            controller_method = "pd"
             if 'system' in data:
                 detection_method = data['system'].get('detection_method', 'cv')
+                controller_method = data['system'].get('controller_method', 'pd')
 
             # Create config object
             config = Config(
@@ -348,6 +353,7 @@ class ConfigManager:
                 throttle_policy=throttle_cfg,
                 visualization=viz_cfg,
                 detection_method=detection_method,
+                controller_method=controller_method,
             )
 
             return config
@@ -424,6 +430,7 @@ class ConfigManager:
                     'lane_width_meters': config.analyzer.lane_width_meters,
                     'max_heading_degrees': config.analyzer.max_heading_degrees,
                     'kp': config.controller.kp,
+                    'ki': config.controller.ki,
                     'kd': config.controller.kd,
                 },
                 'throttle_policy': {
@@ -448,6 +455,7 @@ class ConfigManager:
                 },
                 'system': {
                     'detection_method': config.detection_method,
+                    'controller_method': config.controller_method,
                 },
             }
 
